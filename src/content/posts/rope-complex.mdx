@@ -20,7 +20,7 @@ RoPE 对 Q、K 施加位置相关的旋转，使注意力点积显式依赖相�
 
 ## 代码与运行
 
-<a href={href('examples/rope-torch.py')}>下载完整 PyTorch 脚本</a>，执行 `python -m pip install torch` 安装依赖后，运行 `python rope_torch.py`。各节片段来自同一份源码，共用 `import math`、`import torch` 与 `import torch.nn.functional as F`；后文会复用前面定义的函数。脚本末尾包含数值与梯度验证。另附<a href={href('examples/rope-numpy.py')}>NumPy 对照版</a>。
+<a href={href('examples/rope_torch.py')}>下载完整 PyTorch 脚本</a>，执行 `python -m pip install torch` 安装依赖后，运行 `python rope_torch.py`。各节片段来自同一份源码，共用 `import math`、`import torch` 与 `import torch.nn.functional as F`；后文会复用前面定义的函数。脚本末尾包含数值与梯度验证。另附<a href={href('examples/rope_numpy.py')}>NumPy 对照版</a>。
 
 完整脚本已在 Python 3.12 与 PyTorch 2.14.1 的 CPU 环境运行。代码、默认交互状态和运行结果使用相同参数。改动页面滑块只会更新本地实验；下载脚本后可修改对应变量复现。
 
