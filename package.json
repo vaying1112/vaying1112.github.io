@@ -11,7 +11,7 @@
     "build": "astro build",
     "preview": "astro preview --host 127.0.0.1",
     "check": "astro check",
-    "test:comments": "node --test tests/comments.test.mjs",
+    "test:comments": "node --test tests/*.test.mjs",
     "comments:setup": "node scripts/setup-comments-local.mjs",
     "comments:dev": "wrangler dev --local --ip 127.0.0.1 --config services/comments/wrangler.local.jsonc --port 8787",
     "comments:migrate:local": "wrangler d1 migrations apply yifan-comments --local --config services/comments/wrangler.local.jsonc",
