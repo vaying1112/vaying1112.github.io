@@ -8,8 +8,14 @@ const username = (index < 0 ? 'yifan_admin' : process.argv[index + 1] || '').nor
 if (!/^[a-z0-9_]{3,24}$/.test(username)) throw new Error('请指定 3–24 位小写字母、数字或下划线用户名。');
 const config = `services/comments/wrangler${local ? '.local' : ''}.jsonc`;
 const base = ['d1', 'execute', 'yifan-comments', local ? '--local' : '--remote', '--config', config];
+function parseResult(output) {
+  // Remote file imports can emit progress before the JSON array even with --json.
+  const start = output.search(/^\s*\[/m);
+  if (start < 0) throw new Error('数据库未返回可核对的结果。');
+  return JSON.parse(output.slice(start));
+}
 function query(sql) {
-  const rows = JSON.parse(execFileSync(resolve('node_modules/.bin/wrangler'), [...base, '--command', sql, '--json'], { encoding: 'utf8', maxBuffer: 1024 * 1024 }));
+  const rows = parseResult(execFileSync(resolve('node_modules/.bin/wrangler'), [...base, '--command', sql, '--json'], { encoding: 'utf8', maxBuffer: 1024 * 1024 }));
   if (rows.some(row => !row.success)) throw new Error('数据库操作未完成。'); return rows;
 }
 const quote = text => "'" + String(text).replaceAll("'", "''") + "'";
@@ -24,7 +30,7 @@ INSERT INTO admin_setup(token_hash, user_id, expires_at) SELECT ${quote(hash)}, 
 // Do not place the activation token or its hash in process arguments or terminal output.
 const sqlPath = `.comments-local/admin-provision${local ? '.local' : ''}.sql`;
 await writeFile(sqlPath, sql, { mode: 0o600 });
-const result = JSON.parse(execFileSync(resolve('node_modules/.bin/wrangler'), [...base, '--file', sqlPath, '--json'], { encoding: 'utf8', maxBuffer: 1024 * 1024 }));
+const result = parseResult(execFileSync(resolve('node_modules/.bin/wrangler'), [...base, '--file', sqlPath, '--json'], { encoding: 'utf8', maxBuffer: 1024 * 1024 }));
 if (result.some(row => !row.success)) throw new Error('管理员预建未完成。');
 if (!query(`SELECT user_id FROM admin_setup WHERE user_id = ${quote(id)} AND used_at IS NULL`)[0].results.length) throw new Error('用户名已被使用，请重新运行并指定其他用户名。');
 const siteIndex = process.argv.indexOf('--site-url');

@@ -211,7 +211,7 @@ npm run comments:service:install
 UPDATE comments SET visible = 0 WHERE id = '实际评论ID';
 ```
 
-恢复时将 `visible` 设回 `1`。无需删除原始记录。数据库备份可使用：
+日常删除和恢复应优先使用 `/admin/`，会同步处理回复、回收站记录与待答任务。上述紧急 SQL 仅隐藏单条记录，不进入回收站；手动恢复时将 `visible` 设回 `1`。数据库备份可使用：
 
 ```sh
 npx wrangler d1 export yifan-comments --remote --output=.comments-local/comments-backup.sql --config services/comments/wrangler.jsonc
