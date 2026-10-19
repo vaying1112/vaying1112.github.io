@@ -15,7 +15,7 @@ GitHub Pages 博客 → Cloudflare Worker → D1 保存评论与待答任务
 - 评论、原文引用、回复关系、AI 回复和任务状态存入你的 Cloudflare D1，**不写入 GitHub 仓库**。
 - 文章正文来自站点构建生成的 `/comments-context.json`，只包含已发布文章，即使开发环境也不包含草稿。
 - 每次回答都提供完整文章正文，不按章节筛选、不用摘要替代，也不再截取前 50,000 字符。完整正文按内容哈希形成稳定的参考资料前缀；引用选段、当前问题和同一讨论串最近最多 12 条消息随后提供，当前问题不重复发送。
-- 相同版本的正文参考块缓存在本机处理程序内存中，正文或标题修改后自动刷新。不同讨论不共享模型会话，也不继承作者在桌面应用中的聊天记录。
+- 每个正文版本保存一份只含完整文章与初始化确认的本机 Codex 模板会话。每次提问从模板 fork 出独立的临时任务，复用其缓存键；不会带入其他讨论串，也不继承作者在桌面应用中的聊天记录。领取到新版正文后自动创建新模板。
 - 模型计算仍在云端；本机仅运行领取、调用与回写程序，消耗本机所登录账户的额度。电脑关闭时评论仍可用，AI 任务留在云端等待本机恢复。
 - 本地开发使用 Wrangler 的 D1 模拟数据库，位于 `services/comments/.wrangler/state/v3/d1/`。这些数据不会自动同步到正式数据库。
 
@@ -23,17 +23,17 @@ GitHub Pages 博客 → Cloudflare Worker → D1 保存评论与待答任务
 
 ## 2. 首次在本地运行
 
-需要 Node.js 24、项目依赖和已登录的 Codex CLI。确认登录：
+需要 Node.js 24 和已登录的 Codex 账户。先安装依赖；项目固定使用 Codex CLI 0.163.0，以支持非交互 fork，不修改全局 CLI。确认项目内 CLI 的版本及登录：
 
 ```sh
-codex --version
-codex login status
+npm ci
+npm exec -- codex --version
+npm exec -- codex login status
 ```
 
 在项目根目录执行：
 
 ```sh
-npm ci
 npm run comments:setup
 npm run comments:migrate:local
 ```
@@ -46,6 +46,7 @@ npm run comments:migrate:local
 | `services/comments/.dev.vars` | 本地评论服务的 `WORKER_TOKEN` 和文章索引地址。 |
 | `.comments-local/responder.env` | 本机的 `COMMENTS_API`、`COMMENTS_WORKER_TOKEN`。后者须与服务的 `WORKER_TOKEN` 一致。 |
 | `.comments-local/responder.local.env` | 专用于本地测试的处理程序配置，与正式连接分开。 |
+| `.comments-local/article-sessions.json` | 自动生成的正文模板会话 ID 索引，不保存读者问题。 |
 
 分别在两个终端启动博客和评论服务：
 
@@ -129,16 +130,20 @@ npm run comments:service:install
 - `askAI` 可由访客取消。每条请求最多尝试 3 次，任务租约为 10 分钟，避免两台处理程序重复回答；成功结果按任务 ID 去重。
 - 同一来源 IP 在 10 分钟内最多提交 8 条评论。服务只保存短期哈希计数，不将 IP、登录凭证放入公开评论接口。
 - 本机将待回写的答案临时存入 `.comments-local/outbox.json`；网络恢复后先重试保存，避免重新调用模型。租约过期时旧结果不写入，任务由服务重新领取。
-- 本机程序在独立工作目录调用 `codex exec --ignore-user-config --ephemeral`，禁用终端、浏览器、插件和 MCP 等工具；不向模型进程传递评论服务凭证。只读取现有 Codex 登录，不复制或上传登录文件。临时输入输出目录在任务结束后清理。
-- 在 `.comments-local/responder.env` 可选填 `COMMENTS_MODEL` 指定账户可用模型，或 `COMMENTS_CODEX_BIN` 指向 Codex 可执行文件。未设置时使用 CLI 默认模型及 PATH 中的 Codex。
+- 本机程序使用 `--ignore-user-config` 创建文章模板，并通过 `codex exec --ephemeral fork` 回答读者，禁用终端、浏览器、插件和 MCP 等工具；不向模型进程传递评论服务凭证。只读取现有 Codex 登录，不复制或上传登录文件。临时输入输出目录在任务结束后清理。
+- 在 `.comments-local/responder.env` 可选填 `COMMENTS_MODEL` 指定账户可用模型，或 `COMMENTS_CODEX_BIN` 指向 Codex 可执行文件。未设置时使用 CLI 默认模型及项目安装的 Codex。自定义 CLI 需支持 `exec fork` 和 `--ephemeral`。
 
 ### 上下文复用与用量
 
-[`services/comments/context.mjs`](../services/comments/context.mjs) 按内容哈希复用最多 16 个完整正文版本，不保存讨论数据。完整文章作为固定参考资料放在独立的 developer 消息中，并明确标记 JSON 字段只作资料；问题和讨论历史作为后续 user 输入。模型进程使用固定的空白工作目录 `.comments-local/model-workspace/`，避免每次随机目录改变前缀；任务的临时输出仍在完成后清理。文章只要发生修改，下次便使用新的完整正文。
+[`services/comments/context.mjs`](../services/comments/context.mjs) 按内容哈希复用最多 16 个完整正文版本。完整文章作为固定参考资料放在 developer 消息中，JSON 字段明确只作资料。首次处理某个版本时，先运行一次不含读者问题的初始化，保存文章模板；之后每次都从该模板 fork，追加本次引用、问题和同一讨论串历史。临时 fork 不持久化，不续接其他访客的对话。
 
-这个结构让模型服务可以复用完整文章的相同前缀计算，而不是只缓存选中的章节。模型端缓存仍有有效期和命中条件；保存会话或只发送文章 ID 不代表正文免计 token，正文仍占模型上下文窗口。当前使用 Codex 账户，不把 API 价格折扣直接当作账户额度优惠。机制参考 [OpenAI 提示缓存说明](https://developers.openai.com/api/docs/guides/prompt-caching)。
+模型进程使用固定的空白工作目录 `.comments-local/model-workspace/`，避免随机目录改变前缀。模板 ID 映射在 `.comments-local/article-sessions.json`，模板本身由本机 Codex 会话存储管理（默认位于 `~/.codex/sessions/`）。正文、标题、答疑规则、工具设置、指定模型或调用路径变化时使用新模板；模板被删除时自动重新初始化。磁盘映射不按时间或文章数量自动淘汰；旧的 Codex 模板会话不会自动删除。
 
-每次完成回答，日志记录 `上下文与用量`：正文版本、本次完整正文字数，以及 CLI 返回的 `inputTokens`、`cachedInputTokens`、`outputTokens`。不记录问题正文、昵称或凭证；CLI 未返回用量字段时记为 `null`，缓存命中数为 `0` 时也如实记录。文章过长而超出 CLI 或模型限制时会报错，不通过静默删减正文来完成回答。
+从同一模板 fork 可保留相同缓存键及完整正文前缀。OpenAI 对 GPT-5.6 及后续模型的 API 文档规定，最近一次写入或命中后至少保留 30 分钟，可能更久；这是最低窗口，不是固定的删除时间。当前 Codex CLI 不暴露延长 TTL 的设置或精确到期时间，不能保证保留一天或一周。本机模板不按时间过期。模型缓存仍有有效期和命中条件，失效后仍会提供完整正文重新计算；正文始终占用上下文窗口。当前使用 Codex 账户，不把 API 价格折扣直接当作账户额度优惠。机制参考 [OpenAI 提示缓存说明](https://developers.openai.com/api/docs/guides/prompt-caching)。
+
+每个新正文版本的初始化额外调用一次模型，之后复用模板；这次调用也消耗账户额度。默认每日 20 次限额约束云端领取的答疑任务及其重试，不包含这个本机模板初始化调用。
+
+每次完成回答，日志记录 `上下文与用量`：正文版本、完整正文字数、是否新建模板、初始化调用的 `preparationInputTokens` / `preparationCachedInputTokens` / `preparationOutputTokens`，以及当前回答的 `inputTokens` / `cachedInputTokens` / `outputTokens`。Codex 0.163 的 fork 事件包含模板累计用量，程序减去保存的初始化基线得到本轮用量，并用 `cliCumulativeUsage` 保留原始数字，避免重复统计。不记录问题正文、昵称或凭证；CLI 未返回字段时记为 `null`，命中数为 `0` 时如实记录。正文过长超出 CLI 或模型限制时会报错，不通过静默删减正文完成回答。
 
 通过 Cloudflare 的 D1 控制台或 Wrangler 管理评论。以下为隐藏单条评论的 SQL，替换为实际评论 ID；隐藏主评论会同时让该讨论串不再公开显示：
 

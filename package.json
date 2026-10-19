@@ -33,6 +33,7 @@
   },
   "devDependencies": {
     "@astrojs/check": "latest",
+    "@openai/codex": "0.163.0",
     "typescript": "latest",
     "wrangler": "^4.151.1"
   }

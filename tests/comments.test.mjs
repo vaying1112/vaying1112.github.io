@@ -170,22 +170,47 @@ test('oversized request streams are rejected before database writes', async () =
 
 test('Codex adapter disables user configuration and tools', () => {
   const args = codexArguments('/tmp/isolated', '/tmp/output', '/tmp/schema');
-  for (const flag of ['--ignore-user-config', '--ephemeral', 'read-only', 'features.shell_tool=false', 'features.plugins=false', 'features.apps=false', 'features.multi_agent=false']) assert.ok(args.includes(flag));
+  for (const flag of ['--ignore-user-config', '--ephemeral', 'read-only', 'features.shell_tool=false', 'features.plugins=false', 'features.apps=false', 'features.multi_agent=false', 'features.view_image=false', 'features.goals=false']) assert.ok(args.includes(flag));
   assert.equal(args.some(arg => arg.includes(token)), false);
 });
 
-test('adapter separates the full stable article from visitor input and reports actual usage', async () => {
+test('adapter reuses an article-only template, forks isolated reader turns, and reports usage', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'fake-codex-'));
   const executable = join(directory, 'codex');
-  await writeFile(executable, `#!/usr/bin/env node\nconst fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const context=JSON.parse(input);const fixed=process.argv.find(a=>a.startsWith('developer_instructions='));const instruction=JSON.parse(fixed.slice('developer_instructions='.length));const article=JSON.parse(instruction.split('\\n').at(-1));if(process.env.COMMENTS_WORKER_TOKEN||article.body!=='原文'||context.article||context.comment.body!=='问题')process.exit(2);fs.writeFileSync(process.argv[process.argv.indexOf('--output-last-message')+1],JSON.stringify({answer:'这是基于文章的解释。'}));console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:42,cached_input_tokens:20,output_tokens:10}}));});\n`);
+  const calls = join(directory, 'calls.jsonl');
+  await writeFile(executable, `#!/usr/bin/env node
+const fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{
+ const fork=process.argv.includes('fork');
+ const fixed=process.argv.find(a=>a.startsWith('developer_instructions='));
+ const instruction=JSON.parse(fixed.slice('developer_instructions='.length));
+ const article=JSON.parse(instruction.split('\\n').at(-1));
+ if(process.env.COMMENTS_WORKER_TOKEN||article.body!=='原文'||fork!==process.argv.includes('--ephemeral'))process.exit(2);
+ if(fork&&!JSON.parse(input).comment.body||!fork&&input)process.exit(3);
+ fs.appendFileSync(${JSON.stringify(calls)},JSON.stringify({fork,input})+'\\n');
+ fs.writeFileSync(process.argv[process.argv.indexOf('--output-last-message')+1],JSON.stringify({answer:fork?'这是基于文章的解释。':'文章上下文已准备'}));
+ console.log(JSON.stringify({type:'thread.started',thread_id:'019a0000-0000-7000-8000-000000000001'}));
+ console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:fork?142:100,cached_input_tokens:fork?20:0,output_tokens:fork?13:3}}));
+});
+`);
   await chmod(executable, 0o700);
   process.env.COMMENTS_WORKER_TOKEN = token;
-  let usage;
+  const options = { executable, workspace: join(directory, 'workspace'), sessionCache: join(directory, 'sessions.json') };
+  const usages = [];
   try {
-    const result = await answerWithCodex({ article: { title: 'RoPE', body: '原文' }, comment: { body: '问题', quote: '' }, history: [] }, { executable, workspace: join(directory, 'workspace'), onUsage: value => { usage = value; } });
-    assert.equal(result, '这是基于文章的解释。');
-    assert.equal(usage.inputTokens, 42); assert.equal(usage.cachedInputTokens, 20); assert.equal(usage.outputTokens, 10);
-    assert.equal(usage.articleCharacters, 2);
+    for (const body of ['问题 A', '问题 B']) {
+      const result = await answerWithCodex({ article: { title: 'RoPE', body: '原文' }, comment: { body, quote: '' }, history: [] }, { ...options, onUsage: value => usages.push(value) });
+      assert.equal(result, '这是基于文章的解释。');
+    }
+    const invocations=(await readFile(calls,'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+    assert.deepEqual(invocations.map(call=>call.fork), [false,true,true]);
+    assert.equal(invocations[0].input, '');
+    assert.equal(invocations[2].input.includes('问题 A'), false);
+    const saved=await readFile(options.sessionCache,'utf8');
+    assert.equal(saved.includes('问题 A'), false);assert.equal(saved.includes(token), false);
+    assert.equal(usages[0].preparationInputTokens, 100);assert.equal(usages[1].preparationInputTokens, 0);
+    assert.equal(usages[0].inputTokens, 42);assert.equal(usages[0].cachedInputTokens, 20);assert.equal(usages[0].outputTokens, 10);
+    assert.equal(usages[0].cliCumulativeUsage.input_tokens, 142);
+    assert.equal(usages[0].articleCharacters, 2);assert.equal(usages[1].templateCreated, false);
   } finally { delete process.env.COMMENTS_WORKER_TOKEN; await rm(directory, { recursive: true, force: true }); }
 });
 

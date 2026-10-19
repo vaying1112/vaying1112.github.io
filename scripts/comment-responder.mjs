@@ -48,7 +48,7 @@ try {
       if (!job) { if (process.argv.includes('--once')) break; await pause(30000); continue; }
       console.log(`正在回答文章 ${job.comment.post} 的问题（${job.id}）。`);
       let body;
-      try { body = await answerWithCodex(job, { model: process.env.COMMENTS_MODEL, executable: process.env.COMMENTS_CODEX_BIN || 'codex',
+      try { body = await answerWithCodex(job, { model: process.env.COMMENTS_MODEL, executable: process.env.COMMENTS_CODEX_BIN,
         onUsage: usage => console.log('上下文与用量：' + JSON.stringify(usage)) }); }
       catch (error) { await call(`/internal/jobs/${job.id}/fail`, { lease: job.lease }); throw error; }
       await writeFile(outboxPath, JSON.stringify({ id: job.id, lease: job.lease, body }), { mode: 0o600 });

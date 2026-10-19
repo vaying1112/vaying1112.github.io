@@ -3,6 +3,7 @@ import { homedir } from 'node:os';
 import { resolve, dirname, join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { parseEnv } from 'node:util';
+import { setTimeout as pause } from 'node:timers/promises';
 
 if (process.platform !== 'darwin') throw new Error('这个启动器用于 macOS；其他系统请使用 npm run comments:respond。');
 const label = 'com.yifan-bookmarks.comment-responder';
@@ -33,7 +34,13 @@ if (process.argv.includes('--remove')) {
   await mkdir(dirname(path), { recursive: true }); await mkdir(resolve('.comments-local'), { recursive: true, mode: 0o700 });
   launch('bootout', target);
   await writeFile(path, xml, { mode: 0o600 });
-  const result = launch('bootstrap', `gui/${process.getuid()}`, path);
+  // launchd can still be unloading the prior job when bootout returns.
+  let result;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    result = launch('bootstrap', `gui/${process.getuid()}`, path);
+    if (result.status === 0) break;
+    if (attempt < 4) await pause(500 * (attempt + 1));
+  }
   if (result.status !== 0) throw new Error(result.stderr.trim() || '无法启动本机答疑服务。');
   console.log('已安装本机答疑服务：登录 macOS 后自动启动，后台串行处理评论。日志位于 .comments-local/responder.log。');
 }
