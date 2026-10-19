@@ -5,7 +5,8 @@ import { readFile, writeFile, mkdtemp, rm, chmod } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import worker from '../services/comments/worker.mjs';
-import { answerWithCodex, codexArguments } from '../services/comments/responder.mjs';
+import { answerWithCodex, codexArguments, articleInstructions } from '../services/comments/responder.mjs';
+import { contextFor, articleFor } from '../services/comments/context.mjs';
 
 const schema = await readFile(new URL('../services/comments/migrations/0001_comments.sql', import.meta.url), 'utf8');
 const token = 'test-worker-token-'.repeat(4);
@@ -173,14 +174,57 @@ test('Codex adapter disables user configuration and tools', () => {
   assert.equal(args.some(arg => arg.includes(token)), false);
 });
 
-test('adapter passes article context, parses the structured answer, and withholds queue credentials', async () => {
+test('adapter separates the full stable article from visitor input and reports actual usage', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'fake-codex-'));
   const executable = join(directory, 'codex');
-  await writeFile(executable, `#!/usr/bin/env node\nconst fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const context=JSON.parse(input);if(process.env.COMMENTS_WORKER_TOKEN||!context.article.body)process.exit(2);fs.writeFileSync(process.argv[process.argv.indexOf('--output-last-message')+1],JSON.stringify({answer:'这是基于文章的解释。'}));});\n`);
+  await writeFile(executable, `#!/usr/bin/env node\nconst fs=require('node:fs');let input='';process.stdin.on('data',c=>input+=c);process.stdin.on('end',()=>{const context=JSON.parse(input);const fixed=process.argv.find(a=>a.startsWith('developer_instructions='));const instruction=JSON.parse(fixed.slice('developer_instructions='.length));const article=JSON.parse(instruction.split('\\n').at(-1));if(process.env.COMMENTS_WORKER_TOKEN||article.body!=='原文'||context.article||context.comment.body!=='问题')process.exit(2);fs.writeFileSync(process.argv[process.argv.indexOf('--output-last-message')+1],JSON.stringify({answer:'这是基于文章的解释。'}));console.log(JSON.stringify({type:'turn.completed',usage:{input_tokens:42,cached_input_tokens:20,output_tokens:10}}));});\n`);
   await chmod(executable, 0o700);
   process.env.COMMENTS_WORKER_TOKEN = token;
+  let usage;
   try {
-    const result = await answerWithCodex({ article: { title: 'RoPE', body: '原文' }, comment: { body: '问题', quote: '' }, history: [] }, { executable });
+    const result = await answerWithCodex({ article: { title: 'RoPE', body: '原文' }, comment: { body: '问题', quote: '' }, history: [] }, { executable, workspace: join(directory, 'workspace'), onUsage: value => { usage = value; } });
     assert.equal(result, '这是基于文章的解释。');
+    assert.equal(usage.inputTokens, 42); assert.equal(usage.cachedInputTokens, 20); assert.equal(usage.outputTokens, 10);
+    assert.equal(usage.articleCharacters, 2);
   } finally { delete process.env.COMMENTS_WORKER_TOKEN; await rm(directory, { recursive: true, force: true }); }
+});
+
+const contextualJob = (comment = {}) => ({ article: { title: '旋转位置编码', body: '本文介绍位置编码。\n\n## 符号\n$m,n$ 是位置。\n\n## 矩阵与相对位置\n旋转后的点积保持共同平移不变。\n$$\nR(a)^T R(b)=R(b-a)\n$$\n\n## 多通道与频率\n频率使用几何尺度分布。\n\n## 训练\n学习投影参数。\n' }, comment: { body: '为什么共同平移后点积不变？', quote: '旋转后的点积保持共同平移不变。', ...comment }, history: [] });
+
+test('same full article reuses a version; body or title changes invalidate it', () => {
+  const { article } = contextualJob();
+  const original = articleFor(article);
+  assert.equal(articleFor({ ...article }), original);
+  const changed = articleFor({ ...article, body: article.body + '\n更新后的论述。' });
+  assert.notEqual(changed.version, original.version);
+  assert.ok(changed.body.endsWith('更新后的论述。'));
+  assert.notEqual(articleFor({ ...article, title: '新标题' }).version, original.version);
+});
+
+test('every question receives the complete article, including material beyond 50,000 characters', () => {
+  for (const body of ['能再解释一下吗？', '总结全文中不同视角的联系。', '这里只解释选中的句子。']) {
+    const job = contextualJob({ body });
+    job.article.body += '完整正文不可裁切。'.repeat(10000) + '这是最后一句。';
+    assert.equal(contextFor(job).article.body, job.article.body);
+    assert.ok(contextFor(job).article.body.endsWith('这是最后一句。'));
+  }
+});
+
+test('questions and history do not change the stable article prefix or contaminate other threads', () => {
+  const first = contextualJob(); const second = contextualJob({ body: '另一个问题', quote: '另一句原文' });
+  first.history = [{ role: 'reader', body: '线程 A 的私人测试内容' }];
+  assert.equal(contextFor(first).article, contextFor(second).article);
+  const prefix = articleInstructions(contextFor(first).article);
+  assert.ok(prefix.includes(JSON.stringify(first.article.body)));
+  assert.equal(prefix.includes('线程 A 的私人测试内容'), false);
+  assert.equal(JSON.stringify(contextFor(second)).includes('线程 A 的私人测试内容'), false);
+});
+
+test('thread context is bounded, excludes nicknames, and sends the current question once', () => {
+  const job = contextualJob();
+  job.history = [...Array.from({ length: 13 }, (_, i) => ({ role: 'reader', body: '追问' + i, nickname: '非必要昵称' })), { role: 'reader', body: job.comment.body, quote: job.comment.quote }];
+  const context = contextFor(job);
+  assert.ok(context.history.length <= 12);
+  assert.equal(context.history.some(item => item.body === job.comment.body), false);
+  assert.equal(JSON.stringify(context).includes('非必要昵称'), false);
 });

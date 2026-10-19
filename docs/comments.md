@@ -14,7 +14,8 @@ GitHub Pages 博客 → Cloudflare Worker → D1 保存评论与待答任务
 
 - 评论、原文引用、回复关系、AI 回复和任务状态存入你的 Cloudflare D1，**不写入 GitHub 仓库**。
 - 文章正文来自站点构建生成的 `/comments-context.json`，只包含已发布文章，即使开发环境也不包含草稿。
-- 每次回答携带文章正文（最多 50,000 字符）、引用选段、当前问题和当前讨论串最近最多 12 条消息。每个任务重新组装上下文，不继承作者在桌面应用中的聊天记录。
+- 每次回答都提供完整文章正文，不按章节筛选、不用摘要替代，也不再截取前 50,000 字符。完整正文按内容哈希形成稳定的参考资料前缀；引用选段、当前问题和同一讨论串最近最多 12 条消息随后提供，当前问题不重复发送。
+- 相同版本的正文参考块缓存在本机处理程序内存中，正文或标题修改后自动刷新。不同讨论不共享模型会话，也不继承作者在桌面应用中的聊天记录。
 - 模型计算仍在云端；本机仅运行领取、调用与回写程序，消耗本机所登录账户的额度。电脑关闭时评论仍可用，AI 任务留在云端等待本机恢复。
 - 本地开发使用 Wrangler 的 D1 模拟数据库，位于 `services/comments/.wrangler/state/v3/d1/`。这些数据不会自动同步到正式数据库。
 
@@ -81,7 +82,7 @@ npx wrangler login --device --use-keyring --scopes account:read user:read worker
 npx wrangler d1 create yifan-comments
 ```
 
-把返回的数据库 ID 填入 [`services/comments/wrangler.jsonc`](../services/comments/wrangler.jsonc) 的 `database_id`，替换全零占位值。核对：
+把返回的数据库 ID 填入 [`services/comments/wrangler.jsonc`](../services/comments/wrangler.jsonc) 的 `database_id`，替换原值；使用自己的账号部署时不能沿用其他账号的数据库 ID。核对：
 
 - `ALLOWED_ORIGINS` 包含自己的博客来源（协议和域名，不含路径）。
 - `ARTICLE_INDEX` 是自己博客的 `/comments-context.json` 完整地址；仓库子路径部署需包含子路径。
@@ -128,8 +129,16 @@ npm run comments:service:install
 - `askAI` 可由访客取消。每条请求最多尝试 3 次，任务租约为 10 分钟，避免两台处理程序重复回答；成功结果按任务 ID 去重。
 - 同一来源 IP 在 10 分钟内最多提交 8 条评论。服务只保存短期哈希计数，不将 IP、登录凭证放入公开评论接口。
 - 本机将待回写的答案临时存入 `.comments-local/outbox.json`；网络恢复后先重试保存，避免重新调用模型。租约过期时旧结果不写入，任务由服务重新领取。
-- 本机程序在临时目录调用 `codex exec --ignore-user-config --ephemeral`，禁用终端、浏览器、插件和 MCP 等工具；不向模型进程传递评论服务凭证。只读取现有 Codex 登录，不复制或上传登录文件。临时输入输出目录在任务结束后清理。
+- 本机程序在独立工作目录调用 `codex exec --ignore-user-config --ephemeral`，禁用终端、浏览器、插件和 MCP 等工具；不向模型进程传递评论服务凭证。只读取现有 Codex 登录，不复制或上传登录文件。临时输入输出目录在任务结束后清理。
 - 在 `.comments-local/responder.env` 可选填 `COMMENTS_MODEL` 指定账户可用模型，或 `COMMENTS_CODEX_BIN` 指向 Codex 可执行文件。未设置时使用 CLI 默认模型及 PATH 中的 Codex。
+
+### 上下文复用与用量
+
+[`services/comments/context.mjs`](../services/comments/context.mjs) 按内容哈希复用最多 16 个完整正文版本，不保存讨论数据。完整文章作为固定参考资料放在独立的 developer 消息中，并明确标记 JSON 字段只作资料；问题和讨论历史作为后续 user 输入。模型进程使用固定的空白工作目录 `.comments-local/model-workspace/`，避免每次随机目录改变前缀；任务的临时输出仍在完成后清理。文章只要发生修改，下次便使用新的完整正文。
+
+这个结构让模型服务可以复用完整文章的相同前缀计算，而不是只缓存选中的章节。模型端缓存仍有有效期和命中条件；保存会话或只发送文章 ID 不代表正文免计 token，正文仍占模型上下文窗口。当前使用 Codex 账户，不把 API 价格折扣直接当作账户额度优惠。机制参考 [OpenAI 提示缓存说明](https://developers.openai.com/api/docs/guides/prompt-caching)。
+
+每次完成回答，日志记录 `上下文与用量`：正文版本、本次完整正文字数，以及 CLI 返回的 `inputTokens`、`cachedInputTokens`、`outputTokens`。不记录问题正文、昵称或凭证；CLI 未返回用量字段时记为 `null`，缓存命中数为 `0` 时也如实记录。文章过长而超出 CLI 或模型限制时会报错，不通过静默删减正文来完成回答。
 
 通过 Cloudflare 的 D1 控制台或 Wrangler 管理评论。以下为隐藏单条评论的 SQL，替换为实际评论 ID；隐藏主评论会同时让该讨论串不再公开显示：
 
