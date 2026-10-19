@@ -5,6 +5,17 @@ const get = <T extends HTMLElement>(selector: string) => root.querySelector<T>(s
 const form = get<HTMLFormElement>('[data-auth-form]');
 const username = form.elements.namedItem('username') as HTMLInputElement;
 const password = form.elements.namedItem('password') as HTMLInputElement;
+const confirmPassword = form.elements.namedItem('confirmPassword') as HTMLInputElement;
+function bindPasswordConfirmation(target: HTMLFormElement) {
+  const original = target.elements.namedItem('password') as HTMLInputElement;
+  const confirmation = target.elements.namedItem('confirmPassword') as HTMLInputElement;
+  const validate = () => confirmation.setCustomValidity(!confirmation.disabled && confirmation.value && confirmation.value !== original.value ? '两次输入的密码不一致，请重新确认。' : '');
+  original.addEventListener('input', validate);
+  confirmation.addEventListener('input', validate);
+  target.addEventListener('reset', () => confirmation.setCustomValidity(''));
+  return validate;
+}
+const validateAuthPassword = bindPasswordConfirmation(form);
 const authSubmit = get<HTMLButtonElement>('[data-auth-submit]');
 const posts: { id: string; title: string; url: string }[] = JSON.parse(root.dataset.posts!);
 let mode = 'login', busy = false, next: { before: number; beforeId: string } | null = null;
@@ -13,6 +24,8 @@ try { const destination = new URL(location.href).searchParams.get('return'); con
 function message(value: string, error = false) { const el = get('[data-account-message]'); el.textContent = value; el.toggleAttribute('data-error', error); }
 function setMode(value: string) {
   mode = value; form.reset(); password.autocomplete = mode === 'login' ? 'current-password' : 'new-password'; password.minLength = mode === 'login' ? 1 : 12;
+  get('[data-confirm-password-field]').hidden = mode === 'login'; confirmPassword.disabled = mode === 'login'; confirmPassword.required = mode !== 'login';
+  get('[data-confirm-password-label]').textContent = mode === 'recover' ? '确认新密码' : '确认密码';
   get('[data-recovery-field]').hidden = mode !== 'recover'; (form.elements.namedItem('recoveryCode') as HTMLInputElement).required = mode === 'recover';
   get('[data-register-hint]').hidden = mode === 'login'; get('[data-register-hint]').textContent = mode === 'recover' ? '新密码至少 12 位。重设后请保存新的找回码。' : '密码至少 12 位。注册后请保存找回码，用于重设密码。'; get('[data-password-label]').textContent = mode === 'recover' ? '新密码' : '密码';
   authSubmit.textContent = { login: '登录', register: '创建账号', recover: '重设密码' }[mode]!;
@@ -52,7 +65,7 @@ async function showUser(user: User | null) {
   await history();
 }
 form.addEventListener('submit', async event => {
-  event.preventDefault(); if (busy || !form.reportValidity()) return; busy = true; authSubmit.disabled = true; message('正在处理…');
+  event.preventDefault(); validateAuthPassword(); if (busy || !form.reportValidity()) return; busy = true; authSubmit.disabled = true; message('正在处理…');
   try {
     const data = await accountRequest('/auth/' + mode, { username: username.value, password: password.value, recoveryCode: (form.elements.namedItem('recoveryCode') as HTMLInputElement).value });
     saveToken(data.token); form.reset(); message(''); await showUser(data.user);
@@ -66,9 +79,10 @@ get('[data-recovery-done]').addEventListener('click', () => { get('[data-recover
 get('[data-logout]').addEventListener('click', async () => { try { await accountRequest('/auth/logout', {}); saveToken(''); await showUser(null); message('已退出登录。'); } catch (error) { message(error instanceof Error ? error.message : '退出失败。', true); } });
 get('[data-history-more]').addEventListener('click', () => history(true));
 const changeForm = get<HTMLFormElement>('[data-password-form]');
+const validateChangedPassword = bindPasswordConfirmation(changeForm);
 changeForm.addEventListener('submit', async event => {
-  event.preventDefault(); if (busy || !changeForm.reportValidity()) return; busy = true; const button = changeForm.querySelector<HTMLButtonElement>('button')!; button.disabled = true;
-  try { await accountRequest('/auth/password', Object.fromEntries(new FormData(changeForm))); changeForm.reset(); saveToken(''); await showUser(null); message('密码已更新，请使用新密码登录。'); }
+  event.preventDefault(); validateChangedPassword(); if (busy || !changeForm.reportValidity()) return; busy = true; const button = changeForm.querySelector<HTMLButtonElement>('button')!; button.disabled = true;
+  try { const values = new FormData(changeForm); await accountRequest('/auth/password', { currentPassword: values.get('currentPassword'), password: values.get('password') }); changeForm.reset(); saveToken(''); await showUser(null); message('密码已更新，请使用新密码登录。'); }
   catch (error) { message(error instanceof Error ? error.message : '修改失败。', true); }
   finally { busy = false; button.disabled = false; }
 });

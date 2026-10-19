@@ -13,6 +13,7 @@ const posts = (await getCollection('posts', ({ data }) => !data.draft)).map(post
         <label>用户名<input name="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="3–24 位文字、数字或下划线" autocapitalize="none" spellcheck="false" /></label>
         <label data-recovery-field hidden>找回码<input name="recoveryCode" maxlength="100" autocomplete="off" spellcheck="false" /></label>
         <label><span data-password-label>密码</span><input name="password" type="password" required maxlength="128" autocomplete="current-password" /></label>
+        <label data-confirm-password-field hidden><span data-confirm-password-label>确认密码</span><input name="confirmPassword" type="password" maxlength="128" autocomplete="new-password" disabled /></label>
         <p class="account-hint" data-register-hint hidden>密码至少 12 位。注册后请保存找回码，用于重设密码。</p>
         <button class="account-primary" type="submit" data-auth-submit>登录</button>
         <button class="account-text" type="button" data-forgot>忘记密码？</button>
@@ -27,7 +28,7 @@ const posts = (await getCollection('posts', ({ data }) => !data.draft)).map(post
     <section data-signed-in hidden>
       <div class="account-toolbar"><p><strong data-username></strong><span> · 已登录</span></p><div><a data-return-link hidden>返回文章 ↗</a><button type="button" class="account-text" data-logout>退出登录</button></div></div>
       <div class="account-history" data-history></div><button type="button" class="account-more" data-history-more hidden>查看更多</button>
-      <details class="account-settings"><summary>修改密码</summary><form data-password-form class="account-card"><label>当前密码<input name="currentPassword" type="password" required autocomplete="current-password" maxlength="128" /></label><label>新密码<input name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" /></label><button class="account-primary" type="submit">修改并退出所有设备</button></form></details>
+      <details class="account-settings"><summary>修改密码</summary><form data-password-form class="account-card"><label>当前密码<input name="currentPassword" type="password" required autocomplete="current-password" maxlength="128" /></label><label>新密码<input name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" /></label><label>确认新密码<input name="confirmPassword" type="password" required maxlength="128" autocomplete="new-password" /></label><button class="account-primary" type="submit">修改并退出所有设备</button></form></details>
     </section>
     <noscript>请启用 JavaScript 以使用账号和评论。</noscript>
   </div>
