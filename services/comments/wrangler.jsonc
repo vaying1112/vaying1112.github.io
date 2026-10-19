@@ -1,0 +1,18 @@
+{
+  "$schema": "../../node_modules/wrangler/config-schema.json",
+  "name": "yifan-comments",
+  "main": "worker.mjs",
+  "compatibility_date": "2026-10-19",
+  "workers_dev": true,
+  "vars": {
+    "ALLOWED_ORIGINS": "https://vaying1112.github.io",
+    "ARTICLE_INDEX": "https://vaying1112.github.io/comments-context.json",
+    "AI_DAILY_LIMIT": "20"
+  },
+  "d1_databases": [{
+    "binding": "DB",
+    "database_name": "yifan-comments",
+    "database_id": "e3f1e473-566b-41aa-b3a7-ca349aacfc7b",
+    "migrations_dir": "migrations"
+  }]
+}

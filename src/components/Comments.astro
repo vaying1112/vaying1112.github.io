@@ -1,0 +1,74 @@
+---
+interface Props { postId: string; }
+const { postId } = Astro.props;
+const api = import.meta.env.PUBLIC_COMMENTS_API?.replace(/\/$/, '');
+---
+{api && <section class="comments" id="comments" data-comments data-api={api} data-post={postId} aria-labelledby="comments-title">
+  <div class="comments-heading"><h2 id="comments-title">评论与讨论 <span data-comment-count></span></h2><button type="button" data-refresh>刷新</button></div>
+  <p class="comments-intro">可以选中正文评论，也可以直接在这里提问。昵称会在此浏览器记住。</p>
+  <form data-comment-form>
+    <div class="comment-context" data-compose-context hidden><span data-compose-label></span><button type="button" data-clear-context aria-label="取消引用或回复">×</button><blockquote data-compose-quote hidden></blockquote></div>
+    <label class="nickname-field">昵称<input name="nickname" maxlength="30" required autocomplete="nickname" placeholder="你的昵称" /></label>
+    <label class="sr-only" for="comment-body">评论内容</label>
+    <textarea id="comment-body" name="body" maxlength="2000" required rows="4" placeholder="写下你的问题或想法…"></textarea>
+    <label class="comment-trap" aria-hidden="true">网站<input name="website" tabindex="-1" autocomplete="off" /></label>
+    <div class="comment-actions"><label><input name="askAI" type="checkbox" checked /> 请 AI 解答</label><span data-character-count>0 / 2000</span><button type="submit" class="comment-submit">发表评论 <span aria-hidden="true">↗</span></button></div>
+  </form>
+  <p class="comment-message" data-comment-message role="status" aria-live="polite"></p>
+  <div class="comment-threads" data-comment-threads></div>
+  <button class="comment-more" type="button" data-load-more hidden>查看更早的讨论</button>
+  <p class="comments-footnote">评论公开可见。AI 回复会标明身份，可能存在错误。</p>
+  <button type="button" class="quote-comment-button" data-quote-comment hidden>评论此段 ↗</button>
+  <noscript><p>请启用 JavaScript 以查看和发表评论。</p></noscript>
+</section>}
+<script>
+  import '../scripts/comments';
+</script>
+<style>
+  .comments{margin-top:56px;padding-top:30px;border-top:1px solid var(--line);scroll-margin-top:28px;font-size:13px}
+  .comments-heading{display:flex;justify-content:space-between;align-items:center;gap:16px}
+  .comments h2{font:500 23px/1.5 var(--serif);margin:0}.comments h2 span{font:11px var(--mono);color:var(--muted);margin-left:8px}
+  .comments-heading button,.comment-context button{border:0;background:transparent;color:var(--muted);padding:6px;font-size:12px}
+  .comments-intro,.comments-footnote{font-size:11px;color:var(--muted);margin:12px 0 20px;line-height:1.9}
+  form{background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:18px}
+  .nickname-field{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px;margin-bottom:14px}
+  .nickname-field input{width:min(220px,75%);border:0;border-bottom:1px solid var(--line);background:transparent;padding:5px 0;color:var(--ink);border-radius:0;font-size:13px}
+  textarea{display:block;width:100%;resize:vertical;min-height:100px;border:0;background:transparent;color:var(--ink);font:13px/1.9 var(--sans);padding:0;margin:0}
+  textarea:focus-visible{outline-offset:6px}textarea::placeholder{color:var(--muted)}
+  .comment-actions{display:flex;gap:14px;align-items:center;margin-top:16px}.comment-actions label{display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)}
+  input[type=checkbox]{accent-color:var(--accent)}.comment-actions>span{font:10px var(--mono);color:var(--muted);margin-left:auto}
+  .comment-submit{background:var(--accent);color:var(--paper);border:0;border-radius:4px;padding:9px 14px;font-size:12px;display:flex;gap:15px;align-items:center}
+  .comment-context{display:grid;grid-template-columns:1fr auto;align-items:center;padding:0 0 12px;margin-bottom:14px;border-bottom:1px solid var(--line);color:var(--accent);font-size:11px}
+  .comment-context blockquote{grid-column:1/-1;margin:6px 0 0;padding-left:12px;border-left:2px solid var(--accent);color:var(--muted);line-height:1.9;white-space:pre-wrap;overflow-wrap:anywhere;max-height:160px;overflow:auto}
+  .comment-trap{position:absolute;left:-10000px;width:1px;height:1px;overflow:hidden}
+  .comment-message{font-size:12px;color:var(--muted);margin:14px 0;min-height:20px}.comment-message[data-error]{color:var(--warm)}
+  .comment-threads :global(.comment-thread){border-top:1px solid var(--line);padding:24px 0 8px;scroll-margin-top:30px}
+  .comment-threads :global(.comment-entry){margin-bottom:16px;min-width:0}
+  .comment-threads :global(.comment-meta){display:flex;flex-wrap:wrap;gap:9px;align-items:center;font-size:11px;margin-bottom:9px}
+  .comment-threads :global(.comment-meta strong){font-weight:600;overflow-wrap:anywhere}.comment-threads :global(time){font:10px var(--mono);color:var(--muted)}
+  .comment-threads :global(.comment-role){font-size:9px;background:var(--qa-answer-bg);color:var(--qa-answer);border-radius:3px;padding:1px 5px}
+  .comment-threads :global(.comment-body){line-height:1.9;overflow-wrap:anywhere;min-width:0}
+  .comment-threads :global(.comment-body p){margin:0 0 .8em}.comment-threads :global(.comment-body>p:last-child){margin-bottom:0}
+  .comment-threads :global(.comment-body h4){font-size:13px;line-height:1.8;margin:1.1em 0 .5em;font-weight:600}
+  .comment-threads :global(.comment-body ul),.comment-threads :global(.comment-body ol){padding-left:1.6em;margin:.5em 0 .9em}
+  .comment-threads :global(.comment-body li){margin:.3em 0}.comment-threads :global(.comment-body li p){margin:.25em 0}
+  .comment-threads :global(.comment-body strong){font-weight:600}.comment-threads :global(.comment-body a[href]){text-decoration:underline;text-underline-offset:3px}
+  .comment-threads :global(.comment-body blockquote){border-left:2px solid var(--line);margin:.8em 0;padding-left:12px;color:var(--muted)}
+  .comment-threads :global(.comment-body :not(pre)>code){font:.9em var(--mono);padding:2px 4px;background:var(--code);border-radius:3px}
+  .comment-threads :global(.comment-body pre){overflow:auto;background:var(--code);padding:12px;font:11px/1.7 var(--mono);border-radius:4px}
+  .comment-threads :global(.comment-body .katex){font-size:1.05em;overflow-wrap:normal;word-break:normal}
+  .comment-threads :global(.comment-body .katex-display){overflow-x:auto;overflow-y:hidden;margin:1em 0;padding:4px 0}
+  .comment-threads :global(.comment-table){overflow-x:auto;margin:.8em 0}.comment-threads :global(.comment-table table){border-collapse:collapse;font-size:11px}
+  .comment-threads :global(.comment-table th),.comment-threads :global(.comment-table td){border:1px solid var(--line);padding:7px 10px;text-align:left}
+  .comment-threads :global(.comment-quote){display:block;text-align:left;width:100%;border:0;border-left:2px solid var(--line);background:transparent;color:var(--muted);padding:4px 12px;margin:0 0 12px;font:11px/1.9 var(--sans);white-space:pre-wrap;overflow-wrap:anywhere}
+  .comment-threads :global(.comment-quote:hover){border-color:var(--accent);color:var(--accent)}
+  .comment-threads :global(.comment-reply){border:0;background:transparent;padding:0;color:var(--accent);font-size:11px;margin-top:8px}
+  .comment-threads :global(.comment-ai-status){color:var(--muted);font-size:10px;margin-left:12px}
+  .comment-threads :global(.comment-replies){margin:16px 0 6px 18px;border-left:1px solid var(--line);padding-left:18px}
+  .comment-threads :global(.comment-entry.is-ai){background:var(--qa-answer-bg);border-radius:5px;padding:14px;color:var(--qa-answer)}
+  .comment-more{display:block;margin:14px auto;border:1px solid var(--line);background:transparent;border-radius:4px;padding:8px 16px;color:var(--accent);font-size:11px}
+  .quote-comment-button{position:fixed;z-index:15;background:var(--accent);color:var(--paper);border:0;border-radius:5px;box-shadow:0 4px 20px #0002;padding:8px 13px;font-size:12px}
+  :global(.comment-highlight){outline:2px solid var(--accent);outline-offset:8px;border-radius:2px;transition:outline-color 1s}
+  @media(max-width:640px){.comments{margin-top:35px}.comments h2{font-size:21px}form{padding:15px}.comment-actions{gap:8px}.comment-actions>span{font-size:9px}.comment-submit{padding:9px 11px;gap:8px}.comment-threads :global(.comment-replies){margin-left:6px;padding-left:12px}}
+  @media print{.comments{display:none}}
+</style>

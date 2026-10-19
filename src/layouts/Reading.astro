@@ -1,14 +1,17 @@
 ---
 import Base from './Base.astro';
 import Icon from '../components/Icon.astro';
+import Comments from '../components/Comments.astro';
 import { href, formatDate } from '../site';
 interface Props {
   title: string; description: string;
   headings: { depth: number; slug: string; text: string }[];
   date?: Date; minutes?: number; tags?: string[]; draft?: boolean;
   backText?: string;
+  postId?: string;
 }
-const { title, description, headings, date, minutes, tags = [], draft = false, backText = '全部笔记' } = Astro.props;
+const { title, description, headings, date, minutes, tags = [], draft = false, backText = '全部笔记', postId } = Astro.props;
+const commentsEnabled = Boolean(postId && !draft && import.meta.env.PUBLIC_COMMENTS_API);
 let chapter = 0, subsection = 0;
 const toc = headings.filter(h => h.depth === 2 || h.depth === 3).map(item => {
   if (item.depth === 2) { chapter++; subsection = 0; } else { subsection++; }
@@ -20,7 +23,7 @@ const toc = headings.filter(h => h.depth === 2 || h.depth === 3).map(item => {
   <div id="top"></div><div class="reading-progress" id="reading-progress"></div>
   <div class="article-shell shell">
     <div class="article-grid">
-      <aside class="article-aside reading-sidebar"><div class="toc"><p class="toc-title">本文目录</p><nav aria-label="文章目录">{toc.map(item => <a href={`#${item.slug}`} class:list={{ sub: item.depth === 3 }}><span class="toc-number">{item.number}</span><span>{item.text}</span></a>)}</nav></div></aside>
+      <aside class="article-aside reading-sidebar"><div class="toc"><p class="toc-title">本文目录</p><nav aria-label="文章目录">{toc.map(item => <a href={`#${item.slug}`} class:list={{ sub: item.depth === 3 }}><span class="toc-number">{item.number}</span><span>{item.text}</span></a>)}{commentsEnabled && <a href="#comments"><span class="toc-number">↳</span><span>评论与讨论</span></a>}</nav></div></aside>
       <div class="article-main">
         <a class="back-link" href={href('#notes')}><Icon name="back" size={17} /> {backText}</a>
         <header class="article-header">
@@ -29,17 +32,18 @@ const toc = headings.filter(h => h.depth === 2 || h.depth === 3).map(item => {
           {tags.length > 0 && <div class="post-tags">{tags.map(tag => <a href={href(`?tag=${encodeURIComponent(tag)}#notes`)}>{tag}</a>)}</div>}
         </header>
         <article class="prose" id="article-body"><slot /></article>
+        {postId && !draft && <Comments postId={postId} />}
         <div class="article-bottom"><a class="text-link" href={href('#notes')}><Icon name="back" size={17} /> 返回笔记列表</a><a class="text-link" href={href('math/')}>数学基础 ↗</a></div>
       </div>
     </div>
   </div>
   <button class="mobile-toc-toggle" id="open-toc" aria-haspopup="dialog" aria-controls="mobile-toc">☰ 目录</button>
-  <dialog id="mobile-toc" class="toc-drawer" aria-labelledby="mobile-toc-title"><div class="drawer-heading"><h2 id="mobile-toc-title">本文目录</h2><button id="close-toc" aria-label="关闭目录">×</button></div><nav class="mobile-toc-links" aria-label="移动文章目录">{toc.map(item => <a href={`#${item.slug}`} class:list={{ sub: item.depth === 3 }}><span class="toc-number">{item.number}</span><span>{item.text}</span></a>)}</nav></dialog>
+  <dialog id="mobile-toc" class="toc-drawer" aria-labelledby="mobile-toc-title"><div class="drawer-heading"><h2 id="mobile-toc-title">本文目录</h2><button id="close-toc" aria-label="关闭目录">×</button></div><nav class="mobile-toc-links" aria-label="移动文章目录">{toc.map(item => <a href={`#${item.slug}`} class:list={{ sub: item.depth === 3 }}><span class="toc-number">{item.number}</span><span>{item.text}</span></a>)}{commentsEnabled && <a href="#comments"><span class="toc-number">↳</span><span>评论与讨论</span></a>}</nav></dialog>
   <script>
     const article = document.querySelector<HTMLElement>('#article-body')!;
     const progress = document.querySelector<HTMLElement>('#reading-progress')!;
     const links = [...document.querySelectorAll<HTMLAnchorElement>('.toc a, .mobile-toc-links a')];
-    const headings = [...article.querySelectorAll<HTMLElement>('h2[id], h3[id]')];
+    const headings = [...article.querySelectorAll<HTMLElement>('h2[id], h3[id]'), ...document.querySelectorAll<HTMLElement>('.comments[id]')];
     const update = () => {
       const start = article.getBoundingClientRect().top + window.scrollY - 100;
       const length = Math.max(1, article.offsetHeight - window.innerHeight + 100);

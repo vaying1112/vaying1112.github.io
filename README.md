@@ -8,6 +8,12 @@
 
 流程有变化时，在同一次提交中更新指南、相关模板和本文件；具体约定见[文档维护](docs/authoring.md#文档维护)。仓库的 [AGENTS.md](AGENTS.md) 也记录了这一要求，供后续代码助手遵循。
 
+## 评论与 AI 答疑
+
+支持选段引用、文末评论、公开历史与线程回复，昵称在浏览器记住。Cloudflare Worker 和 D1 保存评论及待答任务，本机 Codex CLI 领取任务、调用云端模型后回写答案；电脑离线时评论仍可用，AI 回复等待本机恢复。评论数据不写入 GitHub。
+
+配置 `PUBLIC_COMMENTS_API` 后，已发布文章自动显示评论区；未配置时隐藏。完整设置、本地预览、免费云端部署、额度与备份见[评论与本机 AI 答疑](docs/comments.md)。
+
 ## 本地使用
 
 需要 Node.js 22.22.0 或更新的受支持偶数主版本，建议 Node.js 24。
@@ -126,6 +132,7 @@ PyTorch 脚本覆盖矩阵、复数、多频率、自动求导、部分旋转、
 
 ```sh
 npm run check
+npm run test:comments
 npm run build
 npm run preview
 ```
@@ -172,7 +179,7 @@ git push origin main
 
 ## 费用
 
-本项目不需要付费主题、服务器或数据库。GitHub Pages 可在其免费额度及使用规则内托管；默认网址无需购买域名。独立域名为可选项，按注册商价格续费。
+静态博客不需要付费主题或自购服务器。GitHub Pages 可在其免费额度及使用规则内托管；评论服务使用 Cloudflare Workers 与 D1 的免费额度，AI 答疑消耗本机所登录模型账户的额度。默认网址无需购买域名。独立域名为可选项，按注册商价格续费。
 
 ## 参考文档
 
