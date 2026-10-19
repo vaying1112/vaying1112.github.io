@@ -19,7 +19,8 @@
     "comments:respond": "node --env-file=.comments-local/responder.env scripts/comment-responder.mjs",
     "comments:respond:local": "node --env-file=.comments-local/responder.local.env scripts/comment-responder.mjs",
     "comments:service:install": "node scripts/comment-service.mjs",
-    "comments:service:remove": "node scripts/comment-service.mjs --remove"
+    "comments:service:remove": "node scripts/comment-service.mjs --remove",
+    "comments:admin:setup": "node scripts/create-comment-admin.mjs"
   },
   "dependencies": {
     "@astrojs/markdown-remark": "latest",

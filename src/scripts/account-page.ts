@@ -1,4 +1,5 @@
 import { accountRequest, currentUser, saveToken, type User } from './account-client';
+import { bindPasswordConfirmation } from './password-confirmation';
 import { renderComment } from './render-comment';
 const root = document.querySelector<HTMLElement>('[data-account]')!;
 const get = <T extends HTMLElement>(selector: string) => root.querySelector<T>(selector)!;
@@ -6,15 +7,6 @@ const form = get<HTMLFormElement>('[data-auth-form]');
 const username = form.elements.namedItem('username') as HTMLInputElement;
 const password = form.elements.namedItem('password') as HTMLInputElement;
 const confirmPassword = form.elements.namedItem('confirmPassword') as HTMLInputElement;
-function bindPasswordConfirmation(target: HTMLFormElement) {
-  const original = target.elements.namedItem('password') as HTMLInputElement;
-  const confirmation = target.elements.namedItem('confirmPassword') as HTMLInputElement;
-  const validate = () => confirmation.setCustomValidity(!confirmation.disabled && confirmation.value && confirmation.value !== original.value ? '两次输入的密码不一致，请重新确认。' : '');
-  original.addEventListener('input', validate);
-  confirmation.addEventListener('input', validate);
-  target.addEventListener('reset', () => confirmation.setCustomValidity(''));
-  return validate;
-}
 const validateAuthPassword = bindPasswordConfirmation(form);
 const authSubmit = get<HTMLButtonElement>('[data-auth-submit]');
 const posts: { id: string; title: string; url: string }[] = JSON.parse(root.dataset.posts!);
@@ -61,6 +53,7 @@ async function showUser(user: User | null) {
   get('[data-auth-panel]').hidden = !!user; get('[data-signed-in]').hidden = !user;
   if (!user) { get('[data-history]').replaceChildren(); return; }
   get('[data-username]').textContent = user.username;
+  get('[data-admin-link]').hidden = user.role !== 'admin';
   if (returnTo) { const a = get<HTMLAnchorElement>('[data-return-link]'); a.href = returnTo; a.hidden = false; }
   await history();
 }
@@ -87,4 +80,5 @@ changeForm.addEventListener('submit', async event => {
   finally { busy = false; button.disabled = false; }
 });
 window.addEventListener('storage', event => { if (event.key === 'yifan-account-session') location.reload(); });
+authSubmit.disabled = false; changeForm.querySelector<HTMLButtonElement>('button[type=submit]')!.disabled = false;
 currentUser().then(showUser).catch(error => message(error.message, true));

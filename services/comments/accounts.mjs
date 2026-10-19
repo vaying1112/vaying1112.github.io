@@ -42,16 +42,16 @@ async function throttle(env, purpose, subject, limit, window) {
 export async function signedIn(request, env) {
   const token = /^Bearer ([0-9a-f]{64})$/.exec(request.headers.get('authorization') || '')?.[1];
   check(token, 401, '请先登录后发表评论。');
-  const user = await env.DB.prepare('SELECT u.id, u.username, u.created_at, s.token_hash, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ?').bind(await sha(token), Date.now()).first();
+  const user = await env.DB.prepare('SELECT u.id, u.username, u.created_at, u.role, s.token_hash, s.expires_at FROM sessions s JOIN users u ON u.id = s.user_id WHERE s.token_hash = ? AND s.expires_at > ? AND u.activated = 1').bind(await sha(token), Date.now()).first();
   check(user, 401, '登录已过期，请重新登录。');
   return user;
 }
-const profile = user => ({ id: user.id, username: user.username, created_at: user.created_at });
+const profile = user => ({ id: user.id, username: user.username, created_at: user.created_at, role: user.role || 'reader' });
 async function session(env, user) {
   const token = random(32), now = Date.now(), expires_at = now + 30 * 86400000;
   const created = await env.DB.batch([
     env.DB.prepare('DELETE FROM sessions WHERE expires_at <= ?').bind(now),
-    env.DB.prepare('INSERT INTO sessions(token_hash, user_id, expires_at) SELECT ?, id, ? FROM users WHERE id = ? AND password_hash = ? RETURNING token_hash').bind(await sha(token), expires_at, user.id, user.password_hash),
+    env.DB.prepare('INSERT INTO sessions(token_hash, user_id, expires_at) SELECT ?, id, ? FROM users WHERE id = ? AND password_hash = ? AND activated = 1 RETURNING token_hash').bind(await sha(token), expires_at, user.id, user.password_hash),
   ]);
   check(created[1].results.length, 401, '密码已变更，请重新登录。');
   return { token, expires_at, user: profile(user) };
@@ -67,6 +67,7 @@ export async function accountRoute(request, env, path, data) {
   }
   const ip = request.headers.get('cf-connecting-ip') || 'local';
   await throttle(env, 'ip', ip, 20, 900000);
+  if (path === '/auth/admin-setup-info' || path === '/auth/admin-setup') return activateAdmin(env, data, path.endsWith('-info'));
   if (path === '/auth/password') {
     const user = await signedIn(request, env);
     const row = await env.DB.prepare('SELECT password_hash FROM users WHERE id = ?').bind(user.id).first();
@@ -98,12 +99,12 @@ export async function accountRoute(request, env, path, data) {
     check(typeof data.password === 'string' && data.password.length <= 256, 400, '密码格式不正确。');
     // A dummy derivation makes missing accounts take the same expensive path.
     const valid = await verifyPassword(data.password, row?.password_hash || 'scrypt:16384:8:5:00000000000000000000000000000000:' + '0'.repeat(64));
-    check(row && valid, 401, '用户名或密码不正确。');
+    check(row && row.activated === 1 && valid, 401, '用户名或密码不正确。');
     return session(env, row);
   }
   check(typeof data.recoveryCode === 'string' && data.recoveryCode.length <= 100, 400, '请填写找回码。');
   const recoveryHash = await sha(data.recoveryCode.trim().replace(/\s|-/g, '').toLowerCase());
-  check(row && timingSafeEqual(new TextEncoder().encode(recoveryHash), new TextEncoder().encode(row.recovery_hash)), 401, '用户名或找回码不正确。');
+  check(row && row.activated === 1 && timingSafeEqual(new TextEncoder().encode(recoveryHash), new TextEncoder().encode(row.recovery_hash)), 401, '用户名或找回码不正确。');
   const next = await hashPassword(password(data.password)), recovery = random(16);
   const result = await env.DB.batch([
     env.DB.prepare('UPDATE users SET password_hash = ?, recovery_hash = ? WHERE id = ? AND recovery_hash = ? RETURNING id').bind(next, await sha(recovery), row.id, recoveryHash),
@@ -111,4 +112,19 @@ export async function accountRoute(request, env, path, data) {
   ]);
   check(result[0].results.length, 409, '找回码已使用，请使用新的找回码。');
   return { ...await session(env, { ...row, password_hash: next }), recoveryCode: recovery };
+}
+
+async function activateAdmin(env, data, infoOnly) {
+  check(typeof data.setupToken === 'string' && /^[0-9a-f]{64}$/.test(data.setupToken), 401, '激活链接无效、已使用或已过期。');
+  const tokenHash = await sha(data.setupToken), now = Date.now();
+  const user = await env.DB.prepare("SELECT u.id, u.username, u.role, u.created_at FROM admin_setup i JOIN users u ON u.id = i.user_id WHERE i.token_hash = ? AND i.used_at IS NULL AND i.expires_at > ? AND u.role = 'admin' AND u.activated = 0").bind(tokenHash, now).first();
+  check(user, 401, '激活链接无效、已使用或已过期，请使用已有账号登录。');
+  if (infoOnly) return { username: user.username };
+  const passwordHash = await hashPassword(password(data.password)), recoveryCode = random(16);
+  const result = await env.DB.batch([
+    env.DB.prepare("UPDATE users SET password_hash = ?, recovery_hash = ?, activated = 1 WHERE id = ? AND role = 'admin' AND activated = 0 AND EXISTS (SELECT 1 FROM admin_setup WHERE token_hash = ? AND used_at IS NULL AND expires_at > ?) RETURNING id").bind(passwordHash, await sha(recoveryCode), user.id, tokenHash, Date.now()),
+    env.DB.prepare('UPDATE admin_setup SET used_at = ? WHERE token_hash = ? AND used_at IS NULL AND EXISTS (SELECT 1 FROM users WHERE id = ? AND password_hash = ?)').bind(Date.now(), tokenHash, user.id, passwordHash),
+  ]);
+  check(result[0].results.length, 409, '此激活链接已使用，请登录管理员账号。');
+  return { ...await session(env, { ...user, password_hash: passwordHash }), recoveryCode };
 }

@@ -8,7 +8,7 @@ import worker from '../services/comments/worker.mjs';
 import { answerWithCodex, codexArguments, articleInstructions } from '../services/comments/responder.mjs';
 import { contextFor, articleFor } from '../services/comments/context.mjs';
 
-const schema = (await Promise.all(['0001_comments.sql', '0002_accounts.sql'].map(name => readFile(new URL('../services/comments/migrations/' + name, import.meta.url), 'utf8')))).join('\n');
+const schema = (await Promise.all(['0001_comments.sql', '0002_accounts.sql', '0003_admin.sql'].map(name => readFile(new URL('../services/comments/migrations/' + name, import.meta.url), 'utf8')))).join('\n');
 const token = 'test-worker-token-'.repeat(4);
 const origin = 'https://vaying1112.github.io';
 const originalFetch = globalThis.fetch;
@@ -327,4 +327,100 @@ test('history pagination, direct thread lookup and AI answer previews respect vi
   e.DB.db.prepare('UPDATE comments SET visible = 0 WHERE id = ?').run(id);
   assert.equal((await request(e, '/comments/thread?post=rope-complex&id=ai-' + id)).status, 404);
   assert.equal((await request(e, '/me/comments?' + cursor, undefined, false, authHeaders(a))).data.comments.length, 2);
+});
+
+async function admin(e) {
+  const account = await register(e);
+  e.DB.db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(account.user.id);
+  return account;
+}
+async function pendingAdmin(e, extra = {}) {
+  const setupToken = 'a'.repeat(64), id = crypto.randomUUID(), username = 'site_owner';
+  const tokenHash = Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(setupToken))), x => x.toString(16).padStart(2, '0')).join('');
+  e.DB.db.prepare("INSERT INTO users(id, username, password_hash, recovery_hash, created_at, role, activated) VALUES (?, ?, 'pending', ?, ?, 'admin', 0)").run(id, username, '0'.repeat(64), Date.now());
+  e.DB.db.prepare('INSERT INTO admin_setup(token_hash, user_id, expires_at) VALUES (?, ?, ?)').run(tokenHash, id, extra.expired ? 0 : Date.now() + 86400000);
+  return { setupToken, id, username };
+}
+test('admin activation requires a private, unexpired, single-use invitation and never grants roles through registration', async () => {
+  const e = env(), invitation = await pendingAdmin(e);
+  assert.equal((await request(e, '/auth/login', { username: invitation.username, password: 'A reading phrase 42!' })).status, 401);
+  assert.equal((await request(e, '/auth/admin-setup-info', { setupToken: 'b'.repeat(64) })).status, 401);
+  const info = await request(e, '/auth/admin-setup-info', { setupToken: invitation.setupToken });
+  assert.deepEqual(info.data, { username: invitation.username });
+  const activated = await request(e, '/auth/admin-setup', { setupToken: invitation.setupToken, password: 'An owner password 42!' });
+  assert.equal(activated.status, 200); assert.equal(activated.data.user.role, 'admin'); assert.ok(activated.data.recoveryCode);
+  assert.equal((await request(e, '/auth/admin-setup', { setupToken: invitation.setupToken, password: 'Another password 42!' })).status, 401);
+  assert.equal((await request(e, '/admin/comments', undefined, false, authHeaders(activated.data))).status, 200);
+  const expired = env(); const old = await pendingAdmin(expired, { expired: true });
+  assert.equal((await request(expired, '/auth/admin-setup', { setupToken: old.setupToken, password: 'An owner password 42!' })).status, 401);
+  const reader = await request(e, '/auth/register', { username: 'ordinary_reader', password: 'A reading phrase 42!', role: 'admin', activated: 1 });
+  assert.equal(reader.data.user.role, 'reader');
+  assert.equal((await request(e, '/admin/comments', undefined, false, authHeaders(reader.data))).status, 403);
+});
+test('moderation checks the current server role on every request and rejects readers, internal tokens and foreign origins', async () => {
+  const e = env(), owner = await admin(e), reader = await register(e);
+  assert.equal((await request(e, '/admin/comments')).status, 401);
+  assert.equal((await request(e, '/admin/comments', undefined, true)).status, 401);
+  assert.equal((await request(e, '/admin/comments', undefined, false, authHeaders(reader))).status, 403);
+  const root = comment(); await request(e, '/comments', root);
+  const path = `/admin/comments/${root.id}/delete`;
+  assert.equal((await request(e, path, { scope: 'thread' }, false, authHeaders(reader))).status, 403);
+  assert.equal((await request(e, path, { scope: 'thread' }, false, { ...authHeaders(owner), Origin: 'https://evil.test' })).status, 403);
+  e.DB.db.prepare("UPDATE users SET role = 'reader' WHERE id = ?").run(owner.user.id);
+  assert.equal((await request(e, '/admin/comments', undefined, false, authHeaders(owner))).status, 403);
+  assert.equal((await request(e, '/comments?post=rope-complex')).data.total, 1);
+});
+test('deleting and restoring a reply branch preserves unrelated messages and does not resurrect an older deletion', async () => {
+  const e = env(), owner = await admin(e), headers = authHeaders(owner);
+  const root = comment({ askAI: false }), reply = comment({ askAI: false, replyTo: root.id }), child = comment({ askAI: false, replyTo: reply.id }), unrelated = comment({ askAI: false, replyTo: root.id });
+  for (const item of [root, reply, child, unrelated]) assert.equal((await request(e, '/comments', item)).status, 200);
+  const branch = await request(e, `/admin/comments/${reply.id}/delete`, { scope: 'entry' }, false, headers);
+  assert.equal(branch.data.affected, 2);
+  let thread = (await request(e, '/comments?post=rope-complex')).data.threads[0]; assert.deepEqual(thread.replies.map(x => x.id), [unrelated.id]);
+  const whole = await request(e, `/admin/comments/${root.id}/delete`, { scope: 'thread' }, false, headers); assert.equal(whole.data.affected, 2);
+  assert.equal((await request(e, '/comments?post=rope-complex')).data.total, 0);
+  assert.equal((await request(e, `/admin/actions/${branch.data.actionId}/restore`, {}, false, headers)).status, 409);
+  assert.equal((await request(e, `/admin/actions/${whole.data.actionId}/restore`, {}, false, headers)).data.affected, 2);
+  thread = (await request(e, '/comments?post=rope-complex')).data.threads[0]; assert.deepEqual(thread.replies.map(x => x.id), [unrelated.id]);
+  assert.equal((await request(e, `/admin/actions/${branch.data.actionId}/restore`, {}, false, headers)).data.affected, 2);
+  assert.equal((await request(e, `/admin/actions/${branch.data.actionId}/restore`, {}, false, headers)).data.affected, 0);
+  assert.equal((await request(e, '/comments?post=rope-complex')).data.threads[0].replies.length, 3);
+});
+test('moderation cancels queued and leased AI tasks; stale completion cannot reappear after restore', async () => {
+  const e = env(), owner = await admin(e), root = comment(), second = comment({ replyTo: root.id });
+  await request(e, '/comments', root); await request(e, '/comments', second);
+  const { data: { job } } = await request(e, '/internal/claim', {}, true);
+  const deleted = await request(e, `/admin/comments/${root.id}/delete`, { scope: 'thread' }, false, authHeaders(owner));
+  assert.equal(deleted.data.affected, 2);
+  assert.equal(e.DB.db.prepare("SELECT count(*) AS n FROM jobs WHERE status = 'cancelled' AND lease IS NULL").get().n, 2);
+  assert.equal((await request(e, `/internal/jobs/${job.id}/complete`, { lease: job.lease, body: 'A stale answer' }, true)).status, 409);
+  await request(e, `/admin/actions/${deleted.data.actionId}/restore`, {}, false, authHeaders(owner));
+  assert.equal((await request(e, '/internal/claim', {}, true)).data.job, null);
+  assert.equal((await request(e, `/internal/jobs/${job.id}/complete`, { lease: job.lease, body: 'A stale answer' }, true)).status, 409);
+  assert.equal((await request(e, '/comments?post=rope-complex')).data.threads[0].ai_status, 'failed');
+});
+test('per-article clear handles more than one hundred comments, scopes deletion, and paginates the trash', async () => {
+  const e = env(), owner = await admin(e), headers = authHeaders(owner);
+  for (let i = 0; i < 125; i++) e.DB.db.prepare('INSERT INTO comments(id, post, nickname, body, created_at) VALUES (?, ?, ?, ?, ?)').run(crypto.randomUUID(), 'rope-complex', 'reader', 'body ' + i, 1000 + i);
+  const other = comment({ post: 'other', askAI: false }); await request(e, '/comments', other);
+  const removed = await request(e, '/admin/comments/clear', { post: 'rope-complex' }, false, headers); assert.equal(removed.data.affected, 125);
+  assert.equal((await request(e, '/comments?post=other')).data.total, 1);
+  assert.equal((await request(e, '/admin/comments/clear', { post: 'rope-complex' }, false, headers)).data.affected, 0);
+  const first = (await request(e, '/admin/comments?post=rope-complex&view=trash', undefined, false, headers)).data;
+  assert.equal(first.counts.active, 0); assert.equal(first.counts.trash, 125); assert.equal(first.comments.length, 20); assert.ok(first.next);
+  const second = (await request(e, '/admin/comments?post=rope-complex&view=trash&' + new URLSearchParams(first.next), undefined, false, headers)).data;
+  assert.equal(new Set([...first.comments, ...second.comments].map(x => x.id)).size, 40);
+  assert.equal(JSON.stringify(first).includes('password_hash'), false); assert.equal(JSON.stringify(first).includes('recovery_hash'), false);
+  assert.equal((await request(e, `/admin/actions/${removed.data.actionId}/restore`, {}, false, headers)).data.affected, 125);
+  assert.equal((await request(e, '/comments?post=rope-complex')).data.total, 125);
+});
+test('an earlier-deleted nested reply cannot be restored while its parent message is still deleted', async () => {
+  const e = env(), owner = await admin(e), headers = authHeaders(owner);
+  const root = comment({ askAI: false }), parent = comment({ replyTo: root.id, askAI: false }), child = comment({ replyTo: parent.id, askAI: false });
+  for (const item of [root, parent, child]) await request(e, '/comments', item);
+  const childDeletion = (await request(e, `/admin/comments/${child.id}/delete`, { scope: 'entry' }, false, headers)).data;
+  const parentDeletion = (await request(e, `/admin/comments/${parent.id}/delete`, { scope: 'entry' }, false, headers)).data;
+  assert.equal((await request(e, `/admin/actions/${childDeletion.actionId}/restore`, {}, false, headers)).status, 409);
+  assert.equal((await request(e, `/admin/actions/${parentDeletion.actionId}/restore`, {}, false, headers)).data.affected, 1);
+  assert.equal((await request(e, `/admin/actions/${childDeletion.actionId}/restore`, {}, false, headers)).data.affected, 1);
 });

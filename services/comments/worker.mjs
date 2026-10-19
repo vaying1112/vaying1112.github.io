@@ -1,4 +1,5 @@
 import { AccountError, accountRoute, signedIn } from './accounts.mjs';
+import { moderationRoute } from './moderation.mjs';
 const encoder = new TextEncoder();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const columns = 'id, post, parent_id, reply_to, nickname, body, quote, anchor, role, ai_status, created_at';
@@ -110,9 +111,10 @@ async function createComment(request, env) {
     const size = await env.DB.prepare('SELECT count(*) AS count FROM comments WHERE parent_id = ?').bind(parent).first();
     requireValue(size.count < 80, 400, '这个讨论较长，请新建一条评论。');
   }
-  const statements = [env.DB.prepare('INSERT INTO comments(id, post, parent_id, reply_to, nickname, body, quote, anchor, ai_status, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, post, parent, replyTo, nickname, body, quote, anchor, data.askAI ? 'queued' : 'none', now, user?.id || null)];
-  if (data.askAI) statements.push(env.DB.prepare('INSERT INTO jobs(comment_id, created_at) VALUES (?, ?)').bind(id, now));
-  await env.DB.batch(statements);
+  const statements = [env.DB.prepare(`INSERT INTO comments(id, post, parent_id, reply_to, nickname, body, quote, anchor, ai_status, created_at, user_id) SELECT ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE (? IS NULL OR EXISTS (SELECT 1 FROM comments WHERE id = ? AND visible = 1)) AND (? IS NULL OR EXISTS (SELECT 1 FROM comments WHERE id = ? AND visible = 1)) RETURNING id`).bind(id, post, parent, replyTo, nickname, body, quote, anchor, data.askAI ? 'queued' : 'none', now, user?.id || null, replyTo, replyTo, parent, parent)];
+  if (data.askAI) statements.push(env.DB.prepare('INSERT INTO jobs(comment_id, created_at) SELECT ?, ? WHERE EXISTS (SELECT 1 FROM comments WHERE id = ?)').bind(id, now, id));
+  const result = await env.DB.batch(statements);
+  requireValue(result[0].results.length, 409, '讨论已被删除，请刷新后重试。');
   return { id };
 }
 async function getThread(url, env) {
@@ -162,7 +164,7 @@ async function claimJob(env) {
   } catch (error) {
     await env.DB.batch([
       env.DB.prepare("UPDATE jobs SET status = 'queued', lease = NULL, available_at = ? WHERE lease = ?").bind(now + 60000, lease),
-      env.DB.prepare("UPDATE comments SET ai_status = 'queued' WHERE id = ?").bind(comment.id),
+      env.DB.prepare("UPDATE comments SET ai_status = 'queued' WHERE id = ? AND visible = 1 AND EXISTS (SELECT 1 FROM jobs WHERE comment_id = ? AND status = 'queued')").bind(comment.id, comment.id),
     ]);
     throw error;
   }
@@ -180,7 +182,7 @@ async function finishJob(id, data, env, failed) {
     const status = job.attempts >= 3 ? 'failed' : 'queued';
     await env.DB.batch([
       env.DB.prepare('UPDATE jobs SET status = ?, available_at = ?, lease = NULL WHERE comment_id = ? AND lease = ?').bind(status, now + 60000 * job.attempts, id, lease),
-      env.DB.prepare('UPDATE comments SET ai_status = ? WHERE id = ?').bind(status, id),
+      env.DB.prepare("UPDATE comments SET ai_status = ? WHERE id = ? AND visible = 1 AND EXISTS (SELECT 1 FROM jobs WHERE comment_id = ? AND status = ?)").bind(status, id, id, status),
     ]);
   } else {
     const body = text(data.body, 8000, '回答');
@@ -191,7 +193,7 @@ async function finishJob(id, data, env, failed) {
         AND EXISTS (SELECT 1 FROM comments WHERE id = ? AND visible = 1) AND EXISTS (SELECT 1 FROM comments WHERE id = ? AND visible = 1)
         ON CONFLICT(id) DO NOTHING`).bind(`ai-${id}`, job.post, parent, id, body, now, id, lease, now, id, parent),
       env.DB.prepare("UPDATE jobs SET status = 'done' WHERE comment_id = ? AND lease = ? AND status = 'working'").bind(id, lease),
-      env.DB.prepare("UPDATE comments SET ai_status = 'answered' WHERE id = ?").bind(id),
+      env.DB.prepare("UPDATE comments SET ai_status = 'answered' WHERE id = ? AND visible = 1 AND EXISTS (SELECT 1 FROM jobs WHERE comment_id = ? AND lease = ? AND status = 'done')").bind(id, id, lease),
     ]);
   }
   return { ok: true };
@@ -217,6 +219,9 @@ export default {
           requireValue(match, 404, '接口不存在。');
           data = await finishJob(match[1], await jsonBody(request), env, match[2] === 'fail');
         }
+      } else if (url.pathname.startsWith('/admin/')) {
+        if (request.method === 'POST') requireValue(origin && allowed.includes(origin), 403, '请从博客管理评论。');
+        data = await moderationRoute(request, env, url, request.method === 'POST' ? await jsonBody(request) : undefined);
       } else if (url.pathname.startsWith('/auth/') || url.pathname === '/me') {
         if (request.method === 'POST') requireValue(origin && allowed.includes(origin), 403, '请从博客操作账号。');
         data = await accountRoute(request, env, url.pathname, request.method === 'POST' ? await jsonBody(request) : undefined);

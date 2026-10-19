@@ -1,4 +1,4 @@
-export interface User { id: string; username: string; created_at: number; }
+export interface User { id: string; username: string; created_at: number; role: 'reader' | 'admin'; }
 const key = 'yifan-account-session';
 export const api = import.meta.env.PUBLIC_COMMENTS_API?.replace(/\/$/, '') || '';
 export function token() { try { return localStorage.getItem(key) || ''; } catch { return ''; } }
@@ -11,7 +11,7 @@ export async function accountRequest(path: string, body?: unknown) {
   const data = await response.json();
   if (!response.ok) {
     if (response.status === 401 && !path.startsWith('/auth/')) saveToken('');
-    throw new Error(data.error || '服务暂时不可用，请稍后再试。');
+    throw Object.assign(new Error(data.error || '服务暂时不可用，请稍后再试。'), { status: response.status });
   }
   return data;
 }
