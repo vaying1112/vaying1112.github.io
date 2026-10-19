@@ -8,7 +8,7 @@ import worker from '../services/comments/worker.mjs';
 import { answerWithCodex, codexArguments, articleInstructions } from '../services/comments/responder.mjs';
 import { contextFor, articleFor } from '../services/comments/context.mjs';
 
-const schema = await readFile(new URL('../services/comments/migrations/0001_comments.sql', import.meta.url), 'utf8');
+const schema = (await Promise.all(['0001_comments.sql', '0002_accounts.sql'].map(name => readFile(new URL('../services/comments/migrations/' + name, import.meta.url), 'utf8')))).join('\n');
 const token = 'test-worker-token-'.repeat(4);
 const origin = 'https://vaying1112.github.io';
 const originalFetch = globalThis.fetch;
@@ -36,7 +36,7 @@ class LocalD1 {
     catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
 }
-function env(extra = {}) { return { DB: new LocalD1(), WORKER_TOKEN: token, ALLOWED_ORIGINS: origin, ARTICLE_INDEX: 'https://article.test/' + crypto.randomUUID(), AI_DAILY_LIMIT: '20', ...extra }; }
+function env(extra = {}) { return { DB: new LocalD1(), WORKER_TOKEN: token, ALLOWED_ORIGINS: origin, ARTICLE_INDEX: 'https://article.test/' + crypto.randomUUID(), AI_DAILY_LIMIT: '20', REQUIRE_LOGIN: 'false', ...extra }; }
 async function request(e, path, data, internal = false, headers = {}) {
   const response = await worker.fetch(new Request('https://comments.test' + path, { method: data === undefined ? 'GET' : 'POST', headers: { ...(data === undefined ? {} : { 'Content-Type': 'application/json' }), ...(internal ? { Authorization: `Bearer ${token}` } : { Origin: origin, 'CF-Connecting-IP': crypto.randomUUID() }), ...headers }, ...(data === undefined ? {} : { body: JSON.stringify(data) }) }), e);
   return { status: response.status, data: await response.json(), response };
@@ -252,4 +252,79 @@ test('thread context is bounded, excludes nicknames, and sends the current quest
   assert.ok(context.history.length <= 12);
   assert.equal(context.history.some(item => item.body === job.comment.body), false);
   assert.equal(JSON.stringify(context).includes('非必要昵称'), false);
+});
+
+async function register(e, name = 'reader_' + crypto.randomUUID().slice(0, 8)) {
+  const result = await request(e, '/auth/register', { username: name, password: 'A reading phrase 42!' });
+  assert.equal(result.status, 200, JSON.stringify(result.data)); return result.data;
+}
+const authHeaders = user => ({ Authorization: 'Bearer ' + user.token });
+test('native accounts store salted scrypt hashes and opaque session digests; case folding prevents duplicates', async () => {
+  const e = env({ REQUIRE_LOGIN: 'true' }), a = await register(e, 'Reader_A');
+  const user = e.DB.db.prepare('SELECT * FROM users').get(), session = e.DB.db.prepare('SELECT * FROM sessions').get();
+  assert.equal(user.username, 'reader_a'); assert.match(user.password_hash, /^scrypt:16384:8:5:/);
+  assert.equal(JSON.stringify(user).includes('A reading phrase'), false); assert.notEqual(user.recovery_hash, a.recoveryCode); assert.notEqual(session.token_hash, a.token);
+  assert.equal((await request(e, '/auth/register', { username: 'READER_A', password: 'Another long phrase' })).status, 409);
+  assert.deepEqual((await request(e, '/me', undefined, false, authHeaders(a))).data.user, a.user);
+  assert.equal((await request(e, '/me', undefined, false, { Authorization: 'Bearer ' + '0'.repeat(64) })).status, 401);
+  assert.equal((await request(e, '/auth/register', { username: 'reader_b', password: 'short' })).status, 400);
+  assert.equal((await request(e, '/auth/register', { username: 'admin', password: 'Another long phrase' })).status, 400);
+});
+test('server binds comment identity to the account and private history excludes other readers and legacy nicknames', async () => {
+  const e = env({ REQUIRE_LOGIN: 'true' }), a = await register(e), b = await register(e);
+  const input = comment({ nickname: b.user.username, user_id: b.user.id, askAI: false });
+  assert.equal((await request(e, '/comments', input)).status, 401);
+  assert.equal((await request(e, '/comments', input, false, authHeaders(a))).status, 200);
+  assert.equal((await request(e, '/comments', input, false, authHeaders(b))).status, 409);
+  const other = comment({ post: 'other', askAI: false }); await request(e, '/comments', other, false, authHeaders(b));
+  const mine = (await request(e, '/me/comments', undefined, false, authHeaders(a))).data.comments;
+  assert.equal(mine.length, 1); assert.equal(mine[0].nickname, a.user.username); assert.equal(mine[0].id, input.id);
+  const publicData = (await request(e, '/comments?post=rope-complex')).data;
+  assert.equal(JSON.stringify(publicData).includes(a.user.id), false); assert.equal(JSON.stringify(publicData).includes('password_hash'), false);
+  const row = e.DB.db.prepare('SELECT user_id FROM comments WHERE id = ?').get(input.id); assert.equal(row.user_id, a.user.id);
+  assert.equal((await request(e, '/me/comments')).status, 401);
+});
+test('login, logout, expiry, password change and one-time recovery revoke the appropriate sessions', async () => {
+  const e = env(), a = await register(e);
+  const login = pass => request(e, '/auth/login', { username: a.user.username, password: pass });
+  assert.equal((await login('incorrect password')).status, 401);
+  const b = (await login('A reading phrase 42!')).data; assert.ok(b.token);
+  assert.equal((await request(e, '/auth/logout', {}, false, authHeaders(b))).status, 200);
+  assert.equal((await request(e, '/me', undefined, false, authHeaders(b))).status, 401);
+  assert.equal((await request(e, '/auth/password', { currentPassword: 'wrong', password: 'A replacement phrase' }, false, authHeaders(a))).status, 401);
+  assert.equal((await request(e, '/auth/password', { currentPassword: 'A reading phrase 42!', password: 'A replacement phrase' }, false, authHeaders(a))).status, 200);
+  assert.equal((await request(e, '/me', undefined, false, authHeaders(a))).status, 401);
+  assert.equal((await login('A reading phrase 42!')).status, 401);
+  const c = (await login('A replacement phrase')).data;
+  const recovered = await request(e, '/auth/recover', { username: a.user.username, recoveryCode: a.recoveryCode, password: 'Recovered phrase 123' });
+  assert.equal(recovered.status, 200); assert.ok(recovered.data.recoveryCode); assert.notEqual(recovered.data.recoveryCode, a.recoveryCode);
+  assert.equal((await request(e, '/me', undefined, false, authHeaders(c))).status, 401);
+  assert.equal((await request(e, '/auth/recover', { username: a.user.username, recoveryCode: a.recoveryCode, password: 'Another recovered phrase' })).status, 401);
+  e.DB.db.prepare('UPDATE sessions SET expires_at = 0').run();
+  assert.equal((await request(e, '/me', undefined, false, authHeaders(recovered.data))).status, 401);
+});
+test('authentication has origin checks, generic login errors, and independent brute-force limits', async () => {
+  const e = env();
+  assert.equal((await request(e, '/auth/register', { username: 'reader_test', password: 'A reading phrase 42!' }, false, { Origin: 'https://evil.test' })).status, 403);
+  for (let i = 0; i < 10; i++) assert.equal((await request(e, '/auth/login', { username: 'missing_account', password: 'wrong' })).status, 401);
+  assert.equal((await request(e, '/auth/login', { username: 'missing_account', password: 'wrong' })).status, 429);
+  assert.equal(e.DB.db.prepare('SELECT count(*) AS n FROM users').get().n, 0);
+});
+test('history pagination, direct thread lookup and AI answer previews respect visibility', async () => {
+  const e = env({ REQUIRE_LOGIN: 'true' }), a = await register(e);
+  for (let i = 0; i < 23; i++) {
+    e.DB.db.prepare('INSERT INTO comments(id, post, nickname, body, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?)').run(crypto.randomUUID(), 'rope-complex', a.user.username, 'Question ' + i, 1000 + i, a.user.id);
+  }
+  const first = (await request(e, '/me/comments', undefined, false, authHeaders(a))).data;
+  assert.equal(first.comments.length, 20); const cursor = new URLSearchParams(first.next);
+  const last = (await request(e, '/me/comments?' + cursor, undefined, false, authHeaders(a))).data;
+  assert.equal(last.comments.length, 3); assert.equal(last.next, null);
+  const id = last.comments[0].id;
+  e.DB.db.prepare("INSERT INTO comments(id, post, parent_id, reply_to, nickname, body, role, created_at) VALUES (?, 'rope-complex', ?, ?, 'AI 助手', 'An answer', 'ai', 2000)").run('ai-' + id, id, id);
+  const thread = await request(e, '/comments/thread?post=rope-complex&id=' + id); assert.equal(thread.status, 200); assert.equal(thread.data.thread.replies.length, 1);
+  assert.equal((await request(e, '/me/comments?' + cursor, undefined, false, authHeaders(a))).data.comments[0].answers.length, 1);
+  assert.equal((await request(e, '/comments/thread?post=other&id=' + id)).status, 404);
+  e.DB.db.prepare('UPDATE comments SET visible = 0 WHERE id = ?').run(id);
+  assert.equal((await request(e, '/comments/thread?post=rope-complex&id=ai-' + id)).status, 404);
+  assert.equal((await request(e, '/me/comments?' + cursor, undefined, false, authHeaders(a))).data.comments.length, 2);
 });

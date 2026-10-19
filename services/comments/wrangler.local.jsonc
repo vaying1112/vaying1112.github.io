@@ -6,12 +6,15 @@
   "vars": {
     "ALLOWED_ORIGINS": "http://127.0.0.1:4321,http://localhost:4321",
     "ARTICLE_INDEX": "http://127.0.0.1:4321/comments-context.json",
-    "AI_DAILY_LIMIT": "20"
+    "AI_DAILY_LIMIT": "20",
+    "REQUIRE_LOGIN": "true"
   },
-  "d1_databases": [{
-    "binding": "DB",
-    "database_name": "yifan-comments",
-    "database_id": "00000000-0000-0000-0000-000000000000",
-    "migrations_dir": "migrations"
-  }]
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "yifan-comments",
+      "database_id": "00000000-0000-0000-0000-000000000000",
+      "migrations_dir": "migrations"
+    }
+  ]
 }

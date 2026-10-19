@@ -1,3 +1,4 @@
+import { AccountError, accountRoute, signedIn } from './accounts.mjs';
 const encoder = new TextEncoder();
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 const columns = 'id, post, parent_id, reply_to, nickname, body, quote, anchor, role, ai_status, created_at';
@@ -78,21 +79,22 @@ async function listComments(url, env) {
   return { threads: roots.map(root => ({ ...root, replies: replies.filter(reply => reply.parent_id === root.id) })), total: total.count, next: rows.results.length > 10 ? { before: last.created_at, beforeId: last.id } : null };
 }
 async function createComment(request, env) {
+  const user = env.REQUIRE_LOGIN === 'false' && !request.headers.has('authorization') ? null : await signedIn(request, env);
   const data = await jsonBody(request);
   requireValue(data && typeof data === 'object', 400, '评论格式不正确。');
   requireValue(!data.website, 400, '无法提交评论。');
   const id = text(data.id, 36, '提交标识');
   requireValue(uuid.test(id), 400, '提交标识无效。');
   const post = text(data.post, 160, '文章');
-  const nickname = text(data.nickname, 30, '昵称');
+  const nickname = user ? user.username : text(data.nickname, 30, '昵称');
   const body = text(data.body, 2000, '评论');
   const quote = text(data.quote ?? '', 600, '引用', true);
   const anchor = text(data.anchor ?? '', 180, '引用位置', true);
   const replyTo = data.replyTo ? text(data.replyTo, 80, '回复对象') : null;
   requireValue(typeof data.askAI === 'boolean', 400, '请选择是否需要 AI 回复。');
-  const prior = await env.DB.prepare('SELECT id, post, nickname, body, reply_to, quote, anchor FROM comments WHERE id = ?').bind(id).first();
+  const prior = await env.DB.prepare('SELECT id, post, nickname, body, reply_to, quote, anchor, user_id FROM comments WHERE id = ?').bind(id).first();
   if (prior) {
-    requireValue(prior.post === post && prior.nickname === nickname && prior.body === body && prior.reply_to === replyTo && prior.quote === quote && prior.anchor === anchor, 409, '提交内容已改变，请重新提交。');
+    requireValue((prior.user_id || null) === (user?.id || null) && prior.post === post && prior.nickname === nickname && prior.body === body && prior.reply_to === replyTo && prior.quote === quote && prior.anchor === anchor, 409, '提交内容已改变，请重新提交。');
     return { id, duplicate: true };
   }
   await article(env, post);
@@ -108,10 +110,30 @@ async function createComment(request, env) {
     const size = await env.DB.prepare('SELECT count(*) AS count FROM comments WHERE parent_id = ?').bind(parent).first();
     requireValue(size.count < 80, 400, '这个讨论较长，请新建一条评论。');
   }
-  const statements = [env.DB.prepare('INSERT INTO comments(id, post, parent_id, reply_to, nickname, body, quote, anchor, ai_status, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, post, parent, replyTo, nickname, body, quote, anchor, data.askAI ? 'queued' : 'none', now)];
+  const statements = [env.DB.prepare('INSERT INTO comments(id, post, parent_id, reply_to, nickname, body, quote, anchor, ai_status, created_at, user_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)').bind(id, post, parent, replyTo, nickname, body, quote, anchor, data.askAI ? 'queued' : 'none', now, user?.id || null)];
   if (data.askAI) statements.push(env.DB.prepare('INSERT INTO jobs(comment_id, created_at) VALUES (?, ?)').bind(id, now));
   await env.DB.batch(statements);
   return { id };
+}
+async function getThread(url, env) {
+  const post = text(url.searchParams.get('post'), 160, '文章');
+  const id = text(url.searchParams.get('id'), 80, '评论');
+  const target = await env.DB.prepare('SELECT id, parent_id FROM comments WHERE id = ? AND post = ? AND visible = 1').bind(id, post).first();
+  requireValue(target, 404, '评论不存在。');
+  const root = await env.DB.prepare(`SELECT ${columns} FROM comments WHERE id = ? AND visible = 1`).bind(target.parent_id || target.id).first();
+  requireValue(root, 404, '讨论已关闭。');
+  const replies = await env.DB.prepare(`SELECT ${columns} FROM comments WHERE parent_id = ? AND visible = 1 ORDER BY created_at, id`).bind(root.id).all();
+  return { thread: { ...root, replies: replies.results } };
+}
+async function myComments(request, url, env) {
+  const user = await signedIn(request, env);
+  const before = Number(url.searchParams.get('before') || Number.MAX_SAFE_INTEGER);
+  const beforeId = url.searchParams.get('beforeId') || '\uffff';
+  requireValue(Number.isSafeInteger(before) && before > 0 && beforeId.length <= 80, 400, '分页参数无效。');
+  const rows = await env.DB.prepare(`SELECT ${columns} FROM comments c WHERE user_id = ? AND visible = 1 AND (parent_id IS NULL OR EXISTS (SELECT 1 FROM comments root WHERE root.id = c.parent_id AND root.visible = 1)) AND (created_at < ? OR (created_at = ? AND id < ?)) ORDER BY created_at DESC, id DESC LIMIT 21`).bind(user.id, before, before, beforeId).all();
+  const items = rows.results.slice(0, 20), last = items.at(-1);
+  const answers = items.length ? (await env.DB.prepare(`SELECT ${columns} FROM comments WHERE role = 'ai' AND visible = 1 AND reply_to IN (${items.map(() => '?').join(',')}) ORDER BY created_at`).bind(...items.map(item => item.id)).all()).results : [];
+  return { comments: items.map(item => ({ ...item, answers: answers.filter(answer => answer.reply_to === item.id) })), next: rows.results.length > 20 ? { before: last.created_at, beforeId: last.id } : null };
 }
 async function claimJob(env) {
   const now = Date.now();
@@ -195,7 +217,12 @@ export default {
           requireValue(match, 404, '接口不存在。');
           data = await finishJob(match[1], await jsonBody(request), env, match[2] === 'fail');
         }
-      } else if (url.pathname === '/comments' && request.method === 'GET') data = await listComments(url, env);
+      } else if (url.pathname.startsWith('/auth/') || url.pathname === '/me') {
+        if (request.method === 'POST') requireValue(origin && allowed.includes(origin), 403, '请从博客操作账号。');
+        data = await accountRoute(request, env, url.pathname, request.method === 'POST' ? await jsonBody(request) : undefined);
+      } else if (url.pathname === '/me/comments' && request.method === 'GET') data = await myComments(request, url, env);
+      else if (url.pathname === '/comments/thread' && request.method === 'GET') data = await getThread(url, env);
+      else if (url.pathname === '/comments' && request.method === 'GET') data = await listComments(url, env);
       else if (url.pathname === '/comments' && request.method === 'POST') {
         requireValue(origin && allowed.includes(origin), 403, '请从博客提交评论。');
         data = await createComment(request, env);
@@ -203,8 +230,8 @@ export default {
       else throw new HttpError(404, '接口不存在。');
       return Response.json(data, { headers });
     } catch (error) {
-      if (!(error instanceof HttpError)) console.error('comments service failed:', error.name);
-      return Response.json({ error: error instanceof HttpError ? error.message : '评论服务暂时不可用，请稍后重试。' }, { status: error instanceof HttpError ? error.status : 503, headers });
+      if (!(error instanceof HttpError || error instanceof AccountError)) console.error('comments service failed:', error.name);
+      return Response.json({ error: (error instanceof HttpError || error instanceof AccountError) ? error.message : '评论服务暂时不可用，请稍后重试。' }, { status: (error instanceof HttpError || error instanceof AccountError) ? error.status : 503, headers });
     }
   },
 };

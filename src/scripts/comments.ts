@@ -1,3 +1,4 @@
+import { accountRequest, currentUser, token, type User } from './account-client';
 import { renderComment } from './render-comment';
 
 interface Entry { id: string; parent_id: string | null; reply_to: string | null; nickname: string; body: string; quote: string; anchor: string; role: string; ai_status: string; created_at: number; }
@@ -12,7 +13,12 @@ function initialize(root: HTMLElement) {
   const post = root.dataset.post!;
   const article = document.querySelector<HTMLElement>('#article-body')!;
   const form = root.querySelector<HTMLFormElement>('form')!;
-  const nickname = form.elements.namedItem('nickname') as HTMLInputElement;
+  let user: User | null = null;
+  const login = root.querySelector<HTMLAnchorElement>('[data-comment-login]')!;
+  const draftKey = 'yifan-comment-draft:' + post;
+  login.href = root.dataset.accountUrl! + '?return=' + encodeURIComponent(location.pathname + location.search + '#comments');
+  function saveDraft() { try { sessionStorage.setItem(draftKey, JSON.stringify({ body: body.value, quote, anchor, replyTo, askAI: askAI.checked })); } catch {} }
+  login.addEventListener('click', saveDraft);
   const body = form.elements.namedItem('body') as HTMLTextAreaElement;
   const askAI = form.elements.namedItem('askAI') as HTMLInputElement;
   const message = root.querySelector<HTMLElement>('[data-comment-message]')!;
@@ -28,7 +34,11 @@ function initialize(root: HTMLElement) {
   let page: Page | null = null;
   let loading = false, sending = false, visible = false;
   let entries: Thread[] = [];
-  try { nickname.value = localStorage.getItem('yifan-comment-nickname') || ''; } catch { /* Storage may be disabled. */ }
+  function syncUser() { currentUser().then(value => { user = value; root.querySelector<HTMLElement>('[data-comment-user]')!.textContent = value ? '以 ' + value.username + ' 的身份评论' : '登录后发表评论'; login.textContent = value ? '我的评论 ↗' : '登录 / 注册 ↗'; login.href = root.dataset.accountUrl! + (value ? '' : '?return=' + encodeURIComponent(location.pathname + location.search + '#comments')); }).catch(error => { user = null; status(error.message, true); }); }
+  syncUser();
+  window.addEventListener('storage', event => { if (event.key === 'yifan-account-session') syncUser(); });
+  window.addEventListener('pageshow', event => { if (event.persisted) syncUser(); });
+  try { const draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); if (draft) { body.value = draft.body || ''; quote = draft.quote || ''; anchor = draft.anchor || ''; replyTo = draft.replyTo || null; askAI.checked = draft.askAI !== false; if (quote || replyTo) compose(quote ? '评论选中的原文' : '继续回复'); root.querySelector<HTMLElement>('[data-character-count]')!.textContent = `${body.value.length} / 2000`; } } catch {}
 
   function status(value: string, error = false) { message.textContent = value; message.toggleAttribute('data-error', error); }
   function clearContext() { quote = ''; anchor = ''; replyTo = null; context.hidden = true; requestId = crypto.randomUUID(); }
@@ -104,26 +114,32 @@ function initialize(root: HTMLElement) {
       if (!response.ok) throw new Error(data.error || '评论加载失败。');
       page = data as Page;
       entries = append ? [...entries, ...page.threads] : page.threads;
+      const linkedId = location.hash.startsWith('#comment-') ? decodeURIComponent(location.hash.slice(9)) : '';
+      if (linkedId && !entries.some(thread => [thread, ...thread.replies].some(item => item.id === linkedId))) {
+        const r = await fetch(api + '/comments/thread?' + new URLSearchParams({ post, id: linkedId }));
+        if (r.ok) { const linked = (await r.json()).thread as Thread; if (!entries.some(item => item.id === linked.id)) entries.unshift(linked); }
+      }
+      entries = entries.filter((item, index, all) => all.findIndex(other => other.id === item.id) === index);
       render();
+      if (linkedId && !silent) document.getElementById('comment-' + linkedId)?.scrollIntoView({ block: 'center' });
       if (!silent || !message.hasAttribute('data-error')) status(entries.length ? '' : '还没有讨论，写下你的第一个问题。');
     } catch (error) { if (!silent) status(error instanceof Error ? error.message : '评论暂时无法加载，请稍后刷新。', true); }
     finally { loading = false; refresh.disabled = false; more.disabled = false; }
   }
-  nickname.addEventListener('input', () => { try { localStorage.setItem('yifan-comment-nickname', nickname.value); } catch {} });
-  form.addEventListener('input', () => { requestId = crypto.randomUUID(); root.querySelector<HTMLElement>('[data-character-count]')!.textContent = `${body.value.length} / 2000`; });
+  form.addEventListener('input', () => { requestId = crypto.randomUUID(); root.querySelector<HTMLElement>('[data-character-count]')!.textContent = `${body.value.length} / 2000`; saveDraft(); });
   root.querySelector('[data-clear-context]')!.addEventListener('click', clearContext);
   refresh.addEventListener('click', () => load());
   more.addEventListener('click', () => load(true));
   form.addEventListener('submit', async event => {
     event.preventDefault(); if (sending || !form.reportValidity()) return;
+    if (!user) { saveDraft(); location.assign(login.href); return; }
     sending = true; submit.disabled = true; status('正在发表…');
     try {
-      const response = await fetch(api + '/comments', { method: 'POST', headers: { 'Content-Type': 'application/json' }, signal: AbortSignal.timeout(20000), body: JSON.stringify({ id: requestId, post, nickname: nickname.value, body: body.value, quote, anchor, replyTo, askAI: askAI.checked, website: (form.elements.namedItem('website') as HTMLInputElement).value }) });
-      const data = await response.json(); if (!response.ok) throw new Error(data.error || '评论发表失败。');
-      try { localStorage.setItem('yifan-comment-nickname', nickname.value.trim()); } catch {}
+      await accountRequest('/comments', { id: requestId, post, body: body.value, quote, anchor, replyTo, askAI: askAI.checked, website: (form.elements.namedItem('website') as HTMLInputElement).value });
+      try { sessionStorage.removeItem(draftKey); } catch {}
       body.value = ''; clearContext(); root.querySelector<HTMLElement>('[data-character-count]')!.textContent = '0 / 2000';
       sending = false; await load(); status(askAI.checked ? '评论已发表，AI 回复将显示在这条讨论下。' : '评论已发表。');
-    } catch (error) { status(error instanceof Error ? error.message : '发表失败，内容已保留，请重试。', true); }
+    } catch (error) { saveDraft(); if (!token()) syncUser(); status(error instanceof Error ? error.message : '发表失败，内容已保留，请重试。', true); }
     finally { sending = false; submit.disabled = false; }
   });
   function updateSelection() {

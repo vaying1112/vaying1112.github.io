@@ -41,6 +41,7 @@ const path = Astro.url.pathname;
         <a href={href('lab/')} aria-current={path.startsWith(href('lab/')) ? 'page' : undefined}>实验室</a>
       </nav>
       <div class="header-actions">
+        {import.meta.env.PUBLIC_COMMENTS_API && <a class="account-nav" href={href('account/')}>我的评论</a>}
         <button class="icon-button" id="open-search" aria-label="搜索文章" title="搜索文章（/）"><Icon name="search" /></button>
         <button class="icon-button" id="theme-toggle" aria-label="切换深色模式" title="切换深色模式"><span class="moon-icon"><Icon name="moon" /></span><span class="sun-icon"><Icon name="sun" /></span></button>
       </div>
@@ -99,3 +100,5 @@ const path = Astro.url.pathname;
     </script>
   </body>
 </html>
+
+<style>.account-nav{font-size:12px;white-space:nowrap;align-self:center;color:var(--accent)}@media(max-width:760px){.site-header{flex-wrap:wrap;height:auto;min-height:96px;gap:12px;padding-block:16px}.header-actions{margin-left:auto;gap:8px;padding-left:12px}.main-nav{order:3;width:100%;justify-content:center;gap:28px}.main-nav a[aria-current]:after{bottom:-5px}}@media(max-width:380px){.site-header{display:flex}.main-nav{padding-top:0}}</style>

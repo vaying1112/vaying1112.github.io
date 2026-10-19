@@ -1,14 +1,15 @@
 ---
 interface Props { postId: string; }
 const { postId } = Astro.props;
+import { href } from '../site';
 const api = import.meta.env.PUBLIC_COMMENTS_API?.replace(/\/$/, '');
 ---
-{api && <section class="comments" id="comments" data-comments data-api={api} data-post={postId} aria-labelledby="comments-title">
+{api && <section class="comments" id="comments" data-comments data-api={api} data-post={postId} data-account-url={href('account/')} aria-labelledby="comments-title">
   <div class="comments-heading"><h2 id="comments-title">评论与讨论 <span data-comment-count></span></h2><button type="button" data-refresh>刷新</button></div>
-  <p class="comments-intro">可以选中正文评论，也可以直接在这里提问。昵称会在此浏览器记住。</p>
+  <p class="comments-intro">可以选中正文评论，也可以直接在这里提问。登录后可在“我的评论”查看历史。</p>
   <form data-comment-form>
     <div class="comment-context" data-compose-context hidden><span data-compose-label></span><button type="button" data-clear-context aria-label="取消引用或回复">×</button><blockquote data-compose-quote hidden></blockquote></div>
-    <label class="nickname-field">昵称<input name="nickname" maxlength="30" required autocomplete="nickname" placeholder="你的昵称" /></label>
+    <div class="comment-account"><span data-comment-user>登录后发表评论</span><a href={href('account/')} data-comment-login>登录 / 注册 ↗</a></div>
     <label class="sr-only" for="comment-body">评论内容</label>
     <textarea id="comment-body" name="body" maxlength="2000" required rows="4" placeholder="写下你的问题或想法…"></textarea>
     <label class="comment-trap" aria-hidden="true">网站<input name="website" tabindex="-1" autocomplete="off" /></label>
@@ -31,6 +32,7 @@ const api = import.meta.env.PUBLIC_COMMENTS_API?.replace(/\/$/, '');
   .comments-heading button,.comment-context button{border:0;background:transparent;color:var(--muted);padding:6px;font-size:12px}
   .comments-intro,.comments-footnote{font-size:11px;color:var(--muted);margin:12px 0 20px;line-height:1.9}
   form{background:var(--surface);border:1px solid var(--line);border-radius:7px;padding:18px}
+  .comment-account{display:flex;justify-content:space-between;gap:12px;font-size:12px;color:var(--muted);margin-bottom:18px}.comment-account a{color:var(--accent)}
   .nickname-field{display:flex;align-items:center;gap:12px;color:var(--muted);font-size:12px;margin-bottom:14px}
   .nickname-field input{width:min(220px,75%);border:0;border-bottom:1px solid var(--line);background:transparent;padding:5px 0;color:var(--ink);border-radius:0;font-size:13px}
   textarea{display:block;width:100%;resize:vertical;min-height:100px;border:0;background:transparent;color:var(--ink);font:13px/1.9 var(--sans);padding:0;margin:0}

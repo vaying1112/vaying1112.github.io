@@ -1,0 +1,40 @@
+---
+import Base from '../layouts/Base.astro';
+import { getCollection } from 'astro:content';
+import { href } from '../site';
+const posts = (await getCollection('posts', ({ data }) => !data.draft)).map(post => ({ id: post.id, title: post.data.title, url: href(`posts/${post.id}/`) }));
+---
+<Base title="我的评论" description="登录一帆书签，查看自己的评论。" noindex>
+  <div class="account-page shell" data-account data-posts={JSON.stringify(posts)}>
+    <header class="account-heading"><p class="eyebrow">一帆书签 / 读者账号</p><h1>我的评论</h1><p>在各篇文章里留下的问题，都收在这里。</p></header>
+    <section class="account-card" data-auth-panel aria-label="账号登录">
+      <div class="account-tabs" role="group" aria-label="选择账号操作"><button type="button" data-mode="login" aria-pressed="true">登录</button><button type="button" data-mode="register" aria-pressed="false">注册</button></div>
+      <form data-auth-form>
+        <label>用户名<input name="username" required minlength="3" maxlength="24" autocomplete="username" placeholder="3–24 位文字、数字或下划线" autocapitalize="none" spellcheck="false" /></label>
+        <label data-recovery-field hidden>找回码<input name="recoveryCode" maxlength="100" autocomplete="off" spellcheck="false" /></label>
+        <label><span data-password-label>密码</span><input name="password" type="password" required maxlength="128" autocomplete="current-password" /></label>
+        <p class="account-hint" data-register-hint hidden>密码至少 12 位。注册后请保存找回码，用于重设密码。</p>
+        <button class="account-primary" type="submit" data-auth-submit>登录</button>
+        <button class="account-text" type="button" data-forgot>忘记密码？</button>
+      </form>
+    </section>
+    <p class="account-message" data-account-message role="status" aria-live="polite"></p>
+    <section class="account-card recovery-card" data-recovery-panel hidden aria-label="保存找回码">
+      <h2>保存你的找回码</h2><p>这段找回码只在此处显示。请保存在密码管理器中，重设密码后会更新。</p>
+      <code data-recovery-code></code><button type="button" class="account-text" data-copy-recovery>复制找回码</button>
+      <button type="button" class="account-primary" data-recovery-done>已保存</button>
+    </section>
+    <section data-signed-in hidden>
+      <div class="account-toolbar"><p><strong data-username></strong><span> · 已登录</span></p><div><a data-return-link hidden>返回文章 ↗</a><button type="button" class="account-text" data-logout>退出登录</button></div></div>
+      <div class="account-history" data-history></div><button type="button" class="account-more" data-history-more hidden>查看更多</button>
+      <details class="account-settings"><summary>修改密码</summary><form data-password-form class="account-card"><label>当前密码<input name="currentPassword" type="password" required autocomplete="current-password" maxlength="128" /></label><label>新密码<input name="password" type="password" required minlength="12" maxlength="128" autocomplete="new-password" /></label><button class="account-primary" type="submit">修改并退出所有设备</button></form></details>
+    </section>
+    <noscript>请启用 JavaScript 以使用账号和评论。</noscript>
+  </div>
+  <script>import '../scripts/account-page';</script>
+</Base>
+<style>
+.account-page{max-width:820px;min-height:65vh;padding-block:46px 70px}.account-heading{margin-bottom:30px}.account-heading h1{font:500 32px/1.5 var(--serif);margin:10px 0}.account-heading>p:last-child{color:var(--muted);font-size:13px}.account-card{padding:26px;border:1px solid var(--line);background:var(--surface);border-radius:8px;max-width:460px}.account-tabs{display:flex;gap:24px;border-bottom:1px solid var(--line);margin-bottom:24px}.account-tabs button{padding:0 0 12px;border:0;border-bottom:2px solid transparent;background:none;font-size:15px;color:var(--muted)}.account-tabs button[aria-pressed=true]{color:var(--accent);border-color:var(--accent)}label{display:grid;gap:7px;font-size:12px;margin-bottom:18px}input{width:100%;min-height:42px;border:1px solid var(--line);background:var(--paper);color:var(--ink);border-radius:4px;padding:9px 11px;font-size:14px}.account-primary{background:var(--accent);color:var(--paper);border:0;border-radius:4px;padding:10px 20px;font-size:13px}.account-text{border:0;background:transparent;font-size:12px;color:var(--accent);padding:8px 10px}.account-hint,.account-message{font-size:12px;color:var(--muted);line-height:1.8}.account-message{min-height:22px;margin:18px 0}.account-message[data-error]{color:var(--warm)}.recovery-card h2{font-size:19px}.recovery-card p{font-size:12px;color:var(--muted)}.recovery-card code{display:block;padding:12px;background:var(--code);font:13px/1.8 var(--mono);overflow-wrap:anywhere;margin:16px 0}.recovery-card .account-primary{display:block;margin-top:16px}.account-toolbar{display:flex;justify-content:space-between;align-items:center;gap:15px;border-bottom:1px solid var(--line);padding-bottom:18px;font-size:13px}.account-toolbar p{margin:0}.account-toolbar span{color:var(--muted);font-size:11px}.account-toolbar a{color:var(--accent);font-size:12px}.account-settings{font-size:12px;margin-top:36px;color:var(--muted)}.account-settings summary{cursor:pointer}.account-settings form{margin-top:18px;color:var(--ink)}.account-more{background:transparent;border:1px solid var(--line);padding:9px 18px;border-radius:4px;color:var(--accent);font-size:12px;margin-top:20px}
+.account-history :global(.history-entry){padding:25px 0;border-bottom:1px solid var(--line);font-size:13px;overflow-wrap:anywhere}.account-history :global(.history-meta){display:flex;flex-wrap:wrap;gap:12px;align-items:center;font-size:11px;color:var(--muted);margin-bottom:14px}.account-history :global(.history-meta a){font-size:13px;color:var(--accent)}.account-history :global(blockquote){margin:12px 0;padding-left:12px;border-left:2px solid var(--line);color:var(--muted);font-size:12px}.account-history :global(.comment-body){line-height:1.9}.account-history :global(.comment-body p){margin:0 0 .7em}.account-history :global(.comment-body pre){overflow:auto;background:var(--code);padding:12px;font:11px/1.8 var(--mono)}.account-history :global(.katex-display){overflow:auto}.account-history :global(.history-link){font-size:11px;color:var(--accent)}.account-history :global(.history-ai){background:var(--qa-answer-bg);color:var(--qa-answer);padding:14px;border-radius:5px;margin:15px 0}.account-history :global(.history-ai summary){cursor:pointer;font-size:12px}.account-history :global(.history-ai .comment-body){margin-top:12px}.account-history :global(.history-empty){color:var(--muted);padding:30px 0;font-size:13px}
+@media(max-width:640px){.account-page{padding-top:28px}.account-card{padding:21px}.account-heading h1{font-size:27px}.account-toolbar{align-items:start;flex-direction:column;gap:8px}}
+</style>
