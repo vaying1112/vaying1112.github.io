@@ -91,13 +91,7 @@ import Visualization from '../../components/Visualization.astro';
 
 同一种可视化可以在一篇文章中重复使用，也可以被多篇文章引用。每个实例有独立的状态和元素 ID；“重置”恢复这个实例传入的初始参数。`anchor` 可选，填写时必须在当前文章内唯一。组件在正文列宽较小时自动堆叠，图和初始数值在关闭脚本时也可阅读。
 
-在文章头部加上引用的实验 ID，用于实验室自动列出“引用文章”：
-
-```yaml
-visualizations: [rope-rotation, rope-frequencies]
-```
-
-普通文章可省略该字段。草稿遵循原有过滤规则，生产环境的实验室不会链接到草稿。错误的实验 ID 会在内容校验时报错。
+可视化直接放在对应文章的推导旁，不需要在文章头部登记实验列表。`id` 对应注册表中的组件，错误或缺失的 ID 会在类型检查或构建时报告；草稿中的交互图随草稿一起排除出正式文章。
 
 | ID | 可选参数 | 默认值 |
 | --- | --- | --- |
@@ -130,7 +124,7 @@ PyTorch 脚本覆盖矩阵、复数、多频率、自动求导、部分旋转、
 
 - **新增文章**：复制 `templates/post.mdx` 到 `src/content/posts/文章名.mdx`，修改头部和正文。首页、标签、目录、搜索、RSS 都会自动生成；不需要改页面和导航。
 - **复用实验**：从上表选择 ID，通过 `options` 配置；文章中无需复制图形或交互脚本。
-- **新增实验**：在 `src/components/visualizations/` 创建 `<实验ID>.astro`，在 `src/visualizations/registry.ts` 登记标题、简介、主题和参数类型。实验室索引、`/lab/<实验ID>/` 独立页会自动生成，文章仍使用同一个 `Visualization` 入口。
+- **新增实验**：在 `src/components/visualizations/` 创建 `<实验ID>.astro`，在 `src/visualizations/registry.ts` 登记标题、简介、主题和参数类型。在对应文章的论述位置使用 `Visualization` 嵌入；不会生成独立目录或实验页面，也不需要更改导航或文章头部。
 
 新增实验组件约定：参数在 Astro frontmatter 中检查；初始 SVG/数值在服务端生成；交互使用独立的自定义元素，只查询自身内部的节点；监听器在元素移除时清理；需要 ID 的表单或 SVG 标记应为每个实例生成唯一 ID。样式写在组件中并复用站点颜色变量。Astro 的脚本打包与自定义元素用法见[官方文档](https://docs.astro.build/en/guides/client-side-scripts/#web-components-with-custom-elements)。
 
@@ -201,4 +195,4 @@ git push origin main
 - 首页展示通用文章目录，支持标签筛选。
 - `rope-complex.mdx`：RoPE 多视角推导、PyTorch 代码与七处内嵌交互图、12 个归纳问答、公开模型参数快照。
 - `/math/`：可复用的数学基础模块。
-- `/lab/`：可视化索引，自动列出引用文章；每个实验都有独立地址。
+- 可视化随对应文章展示；导航不再提供实验室。旧 `/lab/` 跳转到文章列表，已发布的六个实验旧地址跳转到 RoPE 文章的对应交互图。兼容映射位于 `src/visualizations/legacy-links.ts`，新增可视化无需修改它。

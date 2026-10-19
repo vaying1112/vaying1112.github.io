@@ -22,7 +22,7 @@ export interface VisualizationOptions {
   'rope-pairing': Record<string, never>;
 }
 
-// IDs are permanent: articles and standalone experiment URLs refer to them.
+// IDs identify reusable inline visualizations; registering one does not create a page.
 // Each ID has a matching components/visualizations/<id>.astro file.
 export const visualizations = {
   'rope-rotation': {
@@ -42,7 +42,6 @@ export const visualizations = {
 } satisfies Record<keyof VisualizationOptions, { title: string; description: string; topic: string }>;
 
 export type VisualizationId = keyof typeof visualizations;
-export const visualizationIds = Object.keys(visualizations) as [VisualizationId, ...VisualizationId[]];
 
 export function checkNumber(name: string, value: number, min: number, max: number, integer = false) {
   if (!Number.isFinite(value) || value < min || value > max || (integer && !Number.isInteger(value))) {

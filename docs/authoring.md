@@ -52,7 +52,7 @@ draft: true
 
 日期填写实际写作日期。文件名决定文章地址：`attention.mdx` 对应 `/posts/attention/`。修改已发布文章时保留原文件名，可以保留原来的链接。
 
-模板包含 RoPE 的组件导入、公式和实验示例。写其他主题时，替换这些内容；不使用的组件导入和 `visualizations` 字段也应删除。纯文本、公式和代码可以使用 `.md`，嵌入可视化或 Q&A 组件时使用 `.mdx`。
+模板包含 RoPE 的组件导入、公式和实验示例。写其他主题时，替换这些内容；不使用的组件导入也应删除；可视化直接嵌入正文，不需要额外的文章头部字段。纯文本、公式和代码可以使用 `.md`，嵌入可视化或 Q&A 组件时使用 `.mdx`。
 
 正文约定：
 
@@ -79,7 +79,7 @@ import { href } from '../../site';
 
 参见<a href={href('math/#complex')}>复数基础</a>。
 
-<Visualization id="rope-rotation" options={{ m: 2, n: 5, omega: 0.4 }} />
+<Visualization id="rope-rotation" anchor="rotation-example" options={{ m: 2, n: 5, omega: 0.4 }} />
 
 ## 关键问答
 
@@ -90,11 +90,7 @@ import { href } from '../../site';
 
 问题的 `id` 在文章内保持唯一，`number` 按顺序填写。问题应整理为独立、可理解的问答，不直接照搬完整聊天记录。
 
-引用实验时，在文章顶部信息中登记 ID，以便实验室生成引用文章列表：
-
-```yaml
-visualizations: [rope-rotation]
-```
+可视化放在对应文章的相关章节，与公式和代码一起阅读。无需单独的实验室、独立实验页面或文章头部登记；新文章直接插入 `Visualization` 即可。需要定位某张图时，设置该文章内唯一的 `anchor`。
 
 已有实验的参数见 [README](../README.md#在文章里嵌入可视化)。新主题的可视化需要创建组件并登记到注册表，不能只填写一个尚未实现的实验 ID；扩展步骤见 [README](../README.md#扩展文章与实验)。
 
@@ -137,7 +133,7 @@ npm exec astro -- dev stop
 
 RoPE 的 PyTorch 示例以 `src/examples/rope_torch.py` 为来源，`src/examples/rope.ts` 提取代码片段，文章展示与下载复用同一份代码。修改这类示例时更新源脚本，并运行相应脚本核对结果。普通代码围栏直接在文章中修改即可。
 
-修改公共实验会更新所有引用它的文章；修改数学基础时保留已有英文锚点，避免已有文章的引用失效。
+修改公共可视化组件会更新所有引用它的文章；旧实验地址仅保留为文章锚点的兼容跳转，新增组件不必登记旧地址。修改数学基础时保留已有英文锚点，避免已有文章的引用失效。
 
 ## 5. 检查与发布
 

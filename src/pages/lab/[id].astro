@@ -1,30 +1,9 @@
 ---
-import { getCollection } from 'astro:content';
-import Base from '../../layouts/Base.astro';
-import Visualization from '../../components/Visualization.astro';
-import { visualizations, visualizationIds, type VisualizationId } from '../../visualizations/registry';
-import { href, showDrafts } from '../../site';
+import { href } from '../../site';
+import { legacyVisualizationLinks } from '../../visualizations/legacy-links';
 export function getStaticPaths() {
-  return visualizationIds.map(id => ({ params: { id } }));
+  return Object.entries(legacyVisualizationLinks).map(([id, target]) => ({ params: { id }, props: { target } }));
 }
-const id = Astro.params.id as VisualizationId;
-const experiment = visualizations[id];
-const related = await getCollection('posts', ({ data }) => (showDrafts || !data.draft) && data.visualizations.includes(id));
+interface Props { target: string; }
+return Astro.redirect(href(Astro.props.target), 301);
 ---
-<Base title={experiment.title} description={experiment.description}>
-  <div id="top"></div>
-  <div class="shell experiment-page">
-    <a class="back-link" href={href('lab/')}>← 实验室</a>
-    <header class="compact-heading"><h1>{experiment.title}</h1><p>{experiment.description}</p></header>
-    <Visualization id={id} standalone />
-    {related.length > 0 && <nav class="related-reading" aria-label="相关推导"><span>相关推导</span>{related.map(post => <a href={href(`posts/${post.id}/`)}>{post.data.title} ↗</a>)}</nav>}
-  </div>
-</Base>
-<style>
-  .experiment-page{padding-block:26px 50px}
-  .compact-heading{padding-top:22px;padding-bottom:0}
-  .compact-heading p{font-size:12px;color:var(--muted);margin:12px 0 0;line-height:1.9}
-  .related-reading{display:flex;flex-wrap:wrap;gap:12px 24px;font-size:12px;border-top:1px solid var(--line);padding-top:22px}
-  .related-reading span{color:var(--muted)}
-  .related-reading a{color:var(--accent)}
-</style>

@@ -38,7 +38,6 @@ const path = Astro.url.pathname;
       <nav class="main-nav" aria-label="主导航">
         <a href={href()} aria-current={path === href() || path.startsWith(href('posts/')) ? 'page' : undefined}>文章</a>
         <a href={href('math/')} aria-current={path === href('math/') ? 'page' : undefined}>数学基础</a>
-        <a href={href('lab/')} aria-current={path.startsWith(href('lab/')) ? 'page' : undefined}>实验室</a>
       </nav>
       <div class="header-actions">
         {import.meta.env.PUBLIC_COMMENTS_API && <a class="account-nav" href={href('account/')}>我的评论</a>}

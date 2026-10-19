@@ -4,7 +4,6 @@ description: 用一句话说明要解释的问题。
 date: 2026-10-19T12:00:00+08:00
 tags: [数学]
 draft: true
-visualizations: [rope-rotation]
 ---
 
 import Visualization from '../../components/Visualization.astro';
@@ -31,7 +30,8 @@ print(torch.cos(torch.tensor((n - m) * omega)))
 
 调整下方参数，核对公式和代码的结果。
 
-<Visualization id="rope-rotation" options={{ m: 2, n: 5, omega: 0.4 }} />
+{/* 可视化直接嵌入正文，不需要额外登记实验列表；anchor 在本篇文章内保持唯一。 */}
+<Visualization id="rope-rotation" anchor="rotation-example" options={{ m: 2, n: 5, omega: 0.4 }} />
 
 ## 视角二
 
