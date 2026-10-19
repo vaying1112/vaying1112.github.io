@@ -1,0 +1,233 @@
+---
+title: 数学基础
+description: 向量、矩阵、复数、求导与频率尺度，可供不同主题引用。
+---
+
+| 主题 | 用途 |
+| --- | --- |
+| [向量与内积](#vectors) | 理解相似度、夹角和注意力打分 |
+| [矩阵与正交变换](#matrices) | 理解投影、旋转和模长保持 |
+| [三角函数](#trigonometry) | 理解旋转角度、周期和相位差 |
+| [复数与欧拉公式](#complex) | 用乘法表示二维旋转 |
+| [对数与频率尺度](#log-scales) | 理解几何级数和多频率分配 |
+| [导数与链式法则](#derivatives) | 理解参数如何接收梯度 |
+| [softmax 与交叉熵](#softmax) | 理解概率、损失和注意力梯度 |
+| [矩阵指数](#matrix-exponential) | 理解连续旋转的统一形式，选读 |
+
+阅读 RoPE 的基本推导，先掌握前四节；理解训练机制时再读求导与 softmax。
+
+<span id="vectors" className="section-anchor" />
+
+## 向量与内积
+
+向量是一组按顺序排列的数。本文采用列向量，例如：
+
+$$
+q=\begin{pmatrix}q_1\\q_2\end{pmatrix},\qquad
+k=\begin{pmatrix}k_1\\k_2\end{pmatrix}.
+$$
+
+内积把两个向量变成一个实数：
+
+$$
+q^\top k=\sum_{j=1}^{d}q_jk_j
+=\|q\|\|k\|\cos\alpha.
+$$
+
+$\|q\|=\sqrt{\sum_j q_j^2}$ 是长度，$\alpha$ 是夹角。内积同时受长度和方向影响，只有归一化为单位向量后，内积才等于夹角余弦。
+
+例如 $q=(1,0)^\top$、$k=(1/2,\sqrt{3}/2)^\top$ 都是单位向量，夹角为 $\pi/3$，所以内积为 $1/2$。模型中的普通 Q/K 通常不是单位向量，不能直接把注意力分数当成余弦相似度。
+
+<span id="matrices" className="section-anchor" />
+
+## 矩阵与正交变换
+
+矩阵表示线性变换。若 $x\in\mathbb R^d$、$W\in\mathbb R^{h\times d}$，则 $q=Wx\in\mathbb R^h$。因此，输入维度和投影后的注意力头维度可以不同。
+
+矩阵乘法一般不满足交换律：$AB\ne BA$。对列向量，$ABx$ 表示先作用 $B$，再作用 $A$。转置满足：
+
+$$
+(AB)^\top=B^\top A^\top.
+$$
+
+若实方阵 $U$ 满足 $U^\top U=I$，就称为正交矩阵。于是：
+
+$$
+\|Uq\|^2=q^\top U^\top Uq=\|q\|^2,
+\qquad
+(Uq)^\top(Uk)=q^\top k.
+$$
+
+二维旋转矩阵是一个例子：
+
+$$
+R(\phi)=\begin{pmatrix}
+\cos\phi&-\sin\phi\\
+\sin\phi&\cos\phi
+\end{pmatrix},\qquad
+R(\phi)^\top=R(-\phi).
+$$
+
+同时施加相同旋转保持内积；分别施加不同旋转时，结果取决于旋转角之差。
+
+分块对角矩阵 $\operatorname{diag}(A,B)$ 表示分别在两组坐标上作用 $A$ 和 $B$，两组之间没有交叉项。这正是多个二维旋转平面能够拼接起来的原因。
+
+<span id="trigonometry" className="section-anchor" />
+
+## 三角函数与相位
+
+单位圆上角度为 $\phi$ 的点是 $(\cos\phi,\sin\phi)$。公式中的角度使用弧度：$2\pi$ 对应一整圈。
+
+旋转的合成依赖和角公式：
+
+$$
+\begin{aligned}
+\cos(a+b)&=\cos a\cos b-\sin a\sin b,\\
+\sin(a+b)&=\sin a\cos b+\cos a\sin b.
+\end{aligned}
+$$
+
+将它们代入矩阵乘法，可得到 $R(a)R(b)=R(a+b)$。
+
+在 $\cos(m\omega+\beta)$ 中，$m$ 是位置，$\omega$ 是每个位置增加的相位，$\beta$ 是初始相位。两者的相位差为 $(n-m)\omega$。连续位置变量对应的波长为 $2\pi/\omega$；低频表示变化更慢，并不表示幅度更小。
+
+<span id="complex" className="section-anchor" />
+
+## 复数与欧拉公式
+
+把 $(a,b)$ 对应为 $z=a+ib$，其中 $i^2=-1$。复共轭为 $\overline z=a-ib$，模长为 $|z|=\sqrt{a^2+b^2}$。
+
+欧拉公式将指数与三角函数连接起来：
+
+$$
+e^{i\phi}=\cos\phi+i\sin\phi.
+$$
+
+它也可由指数、正弦和余弦的幂级数验证：
+
+$$
+\sum_{j=0}^{\infty}\frac{(i\phi)^j}{j!}
+=\sum_{j=0}^{\infty}\frac{(-1)^j\phi^{2j}}{(2j)!}
++i\sum_{j=0}^{\infty}\frac{(-1)^j\phi^{2j+1}}{(2j+1)!}.
+$$
+
+由于 $|e^{i\phi}|=1$，乘上它只改变方向，不改变长度：
+
+$$
+(a+ib)e^{i\phi}
+=(a\cos\phi-b\sin\phi)
++i(a\sin\phi+b\cos\phi).
+$$
+
+若 $z_q=a+ib$、$z_k=c+id$，则：
+
+$$
+\operatorname{Re}(z_q\overline{z_k})=ac+bd.
+$$
+
+所以二维实向量的内积，等于一个复数乘以另一个复数的共轭后再取实部。
+
+<span id="log-scales" className="section-anchor" />
+
+## 对数与频率尺度
+
+等差数列每步增加同一个量，几何数列每步乘上同一个比例。若：
+
+$$
+\omega_r=B^{-2r/d_{\rm rot}},
+$$
+
+则 $\log\omega_r=-\frac{2r}{d_{\rm rot}}\log B$ 对 $r$ 是线性的，并且：
+
+$$
+\frac{\omega_{r+1}}{\omega_r}=B^{-2/d_{\rm rot}}.
+$$
+
+这叫对数尺度上的均匀分布。举例，$B=10000$、$d_{\rm rot}=8$ 时，四组频率是 $1,0.1,0.01,0.001$，相应的反频率尺度为 $1,10,100,1000$。
+
+这种分配让有限通道覆盖不同变化尺度。等间隔频率、可学习频率等也是可以研究的选择，几何分配不是相对位置性质唯一允许的形式。
+
+<span id="derivatives" className="section-anchor" />
+
+## 导数与链式法则
+
+导数描述一个变量改变时，函数如何局部变化。若 $y=f(u)$、$u=g(w)$，则：
+
+$$
+\frac{dy}{dw}=\frac{dy}{du}\frac{du}{dw}.
+$$
+
+对向量和矩阵，需要对每个分量求导。两个在注意力推导中常用的结果是：
+
+$$
+s=q^\top Ak
+\quad\Longrightarrow\quad
+\frac{\partial s}{\partial q}=Ak,
+\qquad
+\frac{\partial s}{\partial k}=A^\top q.
+$$
+
+如果 $q=Wx$，且上游传来 $g=\partial L/\partial q$，那么：
+
+$$
+\frac{\partial L}{\partial W}=gx^\top.
+$$
+
+例如 $A$ 是由相对位置决定的固定旋转矩阵，梯度中仍然会出现 $A$。固定变换不需要自己被训练，也能改变投影权重收到的梯度。
+
+<span id="softmax" className="section-anchor" />
+
+## softmax 与交叉熵
+
+softmax 把一组分数变成总和为 1 的概率或权重：
+
+$$
+a_j=\frac{e^{s_j}}{\sum_\ell e^{s_\ell}}.
+$$
+
+每个 $a_j$ 都依赖所有分数，而不只依赖 $s_j$：
+
+$$
+\frac{\partial a_j}{\partial s_k}
+=a_j(\delta_{jk}-a_k),
+$$
+
+其中 $\delta_{jk}$ 在 $j=k$ 时为 1，否则为 0。若 $o=\sum_j a_jv_j$、$g=\partial L/\partial o$，链式法则给出：
+
+$$
+\frac{\partial L}{\partial s_j}
+=a_jg^\top(v_j-o).
+$$
+
+这说明，提高一个注意力分数会重新分配整行权重，是否降低最终损失取决于对应值向量 $v_j$ 对输出的作用。
+
+在分类输出中，若正确类别为 $y$，交叉熵为 $L=-\log p_y$，对 softmax 前分数 $z_j$ 的导数为 $p_j-\mathbf 1[j=y]$。注意力权重与最终类别概率位于模型的不同位置，不能直接当作同一个量。
+
+<span id="matrix-exponential" className="section-anchor" />
+
+## 矩阵指数与连续旋转
+
+矩阵指数定义为：
+
+$$
+e^{tA}=I+tA+\frac{t^2A^2}{2!}+\cdots.
+$$
+
+取 $J=\begin{pmatrix}0&-1\\1&0\end{pmatrix}$，由于 $J^2=-I$，可以按奇偶次幂合并得到：
+
+$$
+e^{\phi J}=I\cos\phi+J\sin\phi=R(\phi).
+$$
+
+更一般地，若额外要求位置变换连续、正交，并满足 $T(t+s)=T(t)T(s)$，就可以写成 $T(t)=e^{tA}$，其中 $A^\top=-A$。实反对称矩阵在适当正交基下，由多个二维旋转生成块和零块组成。
+
+这里的连续性、正交性和合成律是额外条件。token 位置本身是整数，仅凭“希望内积依赖相对位置”不能推出 RoPE 是唯一构造。
+
+## 引用方式
+
+各节都可以直接链接，例如 `/math/#complex` 或 `/math/#softmax`。后续文章可以引用对应小节，无需重复整段基础推导。
+
+## 延伸阅读
+
+- [MIT 18.06 线性代数](https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/)
+- [矩阵群与矩阵指数教材](https://www.cis.upenn.edu/~cis6100/geombchap14.pdf)

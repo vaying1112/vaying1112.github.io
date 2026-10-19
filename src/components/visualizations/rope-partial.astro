@@ -1,0 +1,45 @@
+---
+import { responsePath } from '../../visualizations/rope-math';
+import { checkNumber } from '../../visualizations/registry';
+interface Props { delta?: number; content?: number; }
+const { delta = 3, content = 0.6 } = Astro.props;
+checkNumber('delta', delta, 0, 20, true); checkNumber('content', content, -1, 1);
+const rotating = Math.cos(delta * 0.4);
+---
+<rope-partial aria-label="部分旋转的分数分解">
+  <div class="controls"><label>相对位置 Δ <output data-delta-value>{delta}</output><input type="range" min="0" max="20" step="1" value={delta} data-delta /></label><label>内容项 c <output data-content-value>{content.toFixed(2)}</output><input type="range" min="-1" max="1" step="any" value={content} data-content /></label></div>
+  <svg viewBox="0 0 480 250" role="img" aria-label="旋转项随距离振荡，非旋转内容项为水平线，总分为二者之和">
+    <path d="M36 30V218M36 120H462" class="axis"/><text x="14" y="40">2</text><text x="14" y="124">0</text><text x="8" y="208">−2</text><text x="34" y="239">0</text><text x="240" y="239">10</text><text x="445" y="239">20 Δ</text>
+    <path d={responsePath()} class="rotating"/><path data-constant d={`M36 ${120 - content * 42}H456`} class="content"/><path data-total d={responsePath(content)} class="total"/>
+    <path data-guide d={`M${36 + delta * 21} 30V218`} class="guide"/><circle data-point cx={36 + delta * 21} cy={120 - (rotating + content) * 42} r="4"/>
+  </svg>
+  <div class="legend"><span>虚线：旋转项</span><span>暖色：内容项</span><span>实线：总分</span></div>
+  <p class="result" aria-live="polite"><span data-rotating>{rotating.toFixed(4)}</span> + <span data-content>{content.toFixed(4)}</span> = <strong data-score>{(rotating + content).toFixed(4)}</strong></p>
+</rope-partial>
+<script>
+  import { responsePath } from '../../visualizations/rope-math';
+  class RopePartial extends HTMLElement {
+    private events?: AbortController;
+    connectedCallback() {
+      if (this.events) return;
+      this.events = new AbortController(); const { signal } = this.events;
+      const delta = this.querySelector<HTMLInputElement>('[data-delta]')!, content = this.querySelector<HTMLInputElement>('input[data-content]')!;
+      const update = () => {
+        const d = Number(delta.value), c = Number(content.value), rotating = Math.cos(d * 0.4), x = 36 + d * 21;
+        this.querySelector('[data-delta-value]')!.textContent = String(d); this.querySelector('[data-content-value]')!.textContent = c.toFixed(2);
+        this.querySelector('[data-rotating]')!.textContent = rotating.toFixed(4); this.querySelector('span[data-content]')!.textContent = c.toFixed(4); this.querySelector('[data-score]')!.textContent = (rotating + c).toFixed(4);
+        this.querySelector('[data-constant]')!.setAttribute('d', `M36 ${120 - c * 42}H456`); this.querySelector('[data-total]')!.setAttribute('d', responsePath(c));
+        this.querySelector('[data-guide]')!.setAttribute('d', `M${x} 30V218`); this.querySelector('[data-point]')!.setAttribute('cx', String(x)); this.querySelector('[data-point]')!.setAttribute('cy', String(120 - (rotating + c) * 42));
+      };
+      this.addEventListener('input', update, { signal }); update();
+    }
+    disconnectedCallback() { this.events?.abort(); this.events = undefined; }
+  }
+  if (!customElements.get('rope-partial')) customElements.define('rope-partial', RopePartial);
+</script>
+<style>
+  rope-partial{display:block;padding:20px;background:var(--surface);border:1px solid var(--line)}
+  .controls{display:flex;gap:24px;flex-wrap:wrap}.controls label{flex:1;min-width:140px;font-size:11px}output{float:right;font-family:var(--mono);color:var(--accent)}
+  svg{width:100%;height:auto;display:block;margin-block:16px}.axis{fill:none;stroke:var(--muted);stroke-width:.7}svg text{fill:var(--muted);font:10px var(--mono)}svg path{fill:none}.rotating{stroke:var(--accent);stroke-dasharray:4 4;stroke-width:1.5}.content{stroke:var(--warm);stroke-width:1.5}.total{stroke:var(--accent);stroke-width:2}.guide{stroke:var(--muted);stroke-dasharray:2 4;opacity:.5}circle{fill:var(--accent)}
+  .legend{display:flex;justify-content:center;gap:16px;flex-wrap:wrap;color:var(--muted);font-size:10px}.result{font:16px/1.8 var(--mono);text-align:center;color:var(--accent);margin:15px 0 0}
+</style>

@@ -1,0 +1,31 @@
+---
+import { getCollection } from 'astro:content';
+import Base from '../layouts/Base.astro';
+import Icon from '../components/Icon.astro';
+import { href, formatDate, showDrafts } from '../site';
+const posts = (await getCollection('posts', ({ data }) => showDrafts || !data.draft)).sort((a, b) => b.data.date.valueOf() - a.data.date.valueOf() || a.id.localeCompare(b.id));
+const tags = [...new Set(posts.flatMap(p => p.data.tags))];
+---
+<Base>
+  <div id="top"></div>
+  <section class="compact-heading shell"><h1>文章</h1></section>
+  <section class="notes-section shell" id="notes" aria-labelledby="notes-title">
+    <h2 id="notes-title" class="sr-only">文章列表</h2>
+      <div class="notes-main">
+        {posts.length > 0 && <div class="filter-bar" aria-label="按标签筛选"><button class="filter active" data-filter="all" aria-pressed="true">全部</button>{tags.map(tag => <button class="filter" data-filter={tag} aria-pressed="false">{tag}</button>)}</div>}
+        <div class="post-list">
+          {posts.map((post, i) => <article class="post-row" data-tags={JSON.stringify(post.data.tags)}><div class="post-number">{String(i + 1).padStart(2, '0')}</div><div class="post-summary"><div class="post-meta"><time datetime={post.data.date.toISOString()}>{formatDate(post.data.date)}</time>{post.data.draft && <span>草稿</span>}</div><h3><a href={href(`posts/${post.id}/`)}>{post.data.title}</a></h3><p>{post.data.description}</p><div class="post-tags">{post.data.tags.map(tag => <span>{tag}</span>)}</div></div><a class="post-arrow" href={href(`posts/${post.id}/`)} aria-label={`阅读 ${post.data.title}`}><Icon name="arrow" /></a></article>)}
+          {posts.length === 0 && <p class="empty-posts muted">暂无已发布文章。</p>}
+        </div>
+        <p id="filter-status" class="sr-only" role="status"></p>
+      </div>
+  </section>
+  <script>
+    const filters = document.querySelectorAll<HTMLButtonElement>('[data-filter]');
+    const rows = document.querySelectorAll<HTMLElement>('.post-row');
+    const applyFilter = (button: HTMLButtonElement) => { const filter = button.dataset.filter!; let count = 0; filters.forEach(item => { const active = item === button; item.classList.toggle('active', active); item.setAttribute('aria-pressed', String(active)); }); rows.forEach(row => { row.hidden = filter !== 'all' && !JSON.parse(row.dataset.tags!).includes(filter); if (!row.hidden) count++; }); document.querySelector('#filter-status')!.textContent = `显示 ${count} 篇笔记`; };
+    filters.forEach(button => button.addEventListener('click', () => applyFilter(button)));
+    const requested = new URLSearchParams(location.search).get('tag');
+    if (requested) { const selected = [...filters].find(button => button.dataset.filter === requested); if (selected) applyFilter(selected); }
+  </script>
+</Base>

@@ -1,0 +1,98 @@
+---
+import Base from './Base.astro';
+import Icon from '../components/Icon.astro';
+import { href, formatDate } from '../site';
+interface Props {
+  title: string; description: string;
+  headings: { depth: number; slug: string; text: string }[];
+  date?: Date; minutes?: number; tags?: string[]; draft?: boolean;
+  backText?: string;
+}
+const { title, description, headings, date, minutes, tags = [], draft = false, backText = '全部笔记' } = Astro.props;
+let chapter = 0, subsection = 0;
+const toc = headings.filter(h => h.depth === 2 || h.depth === 3).map(item => {
+  if (item.depth === 2) { chapter++; subsection = 0; } else { subsection++; }
+  const number = item.depth === 2 ? String(chapter).padStart(2, '0') : `${chapter}.${subsection}`;
+  return { ...item, number };
+});
+---
+<Base title={title} description={description} noindex={draft}>
+  <div id="top"></div><div class="reading-progress" id="reading-progress"></div>
+  <div class="article-shell shell">
+    <div class="article-grid">
+      <aside class="article-aside reading-sidebar"><div class="toc"><p class="toc-title">本文目录</p><nav aria-label="文章目录">{toc.map(item => <a href={`#${item.slug}`} class:list={{ sub: item.depth === 3 }}><span class="toc-number">{item.number}</span><span>{item.text}</span></a>)}</nav></div></aside>
+      <div class="article-main">
+        <a class="back-link" href={href('#notes')}><Icon name="back" size={17} /> {backText}</a>
+        <header class="article-header">
+          {(date || draft) && <div class="post-meta">{date && <time datetime={date.toISOString()}>{formatDate(date)}</time>}{minutes && <span>· 约 {minutes} 分钟</span>}{draft && <span>· 草稿</span>}</div>}
+          <h1>{title}</h1><p class="article-description">{description}</p>
+          {tags.length > 0 && <div class="post-tags">{tags.map(tag => <a href={href(`?tag=${encodeURIComponent(tag)}#notes`)}>{tag}</a>)}</div>}
+        </header>
+        <article class="prose" id="article-body"><slot /></article>
+        <div class="article-bottom"><a class="text-link" href={href('#notes')}><Icon name="back" size={17} /> 返回笔记列表</a><a class="text-link" href={href('math/')}>数学基础 ↗</a></div>
+      </div>
+    </div>
+  </div>
+  <button class="mobile-toc-toggle" id="open-toc" aria-haspopup="dialog" aria-controls="mobile-toc">☰ 目录</button>
+  <dialog id="mobile-toc" class="toc-drawer" aria-labelledby="mobile-toc-title"><div class="drawer-heading"><h2 id="mobile-toc-title">本文目录</h2><button id="close-toc" aria-label="关闭目录">×</button></div><nav class="mobile-toc-links" aria-label="移动文章目录">{toc.map(item => <a href={`#${item.slug}`} class:list={{ sub: item.depth === 3 }}><span class="toc-number">{item.number}</span><span>{item.text}</span></a>)}</nav></dialog>
+  <script>
+    const article = document.querySelector<HTMLElement>('#article-body')!;
+    const progress = document.querySelector<HTMLElement>('#reading-progress')!;
+    const links = [...document.querySelectorAll<HTMLAnchorElement>('.toc a, .mobile-toc-links a')];
+    const headings = [...article.querySelectorAll<HTMLElement>('h2[id], h3[id]')];
+    const update = () => {
+      const start = article.getBoundingClientRect().top + window.scrollY - 100;
+      const length = Math.max(1, article.offsetHeight - window.innerHeight + 100);
+      progress.style.transform = `scaleX(${Math.max(0, Math.min(1, (window.scrollY - start) / length))})`;
+      let active = headings[0]?.id;
+      for (const heading of headings) { if (heading.getBoundingClientRect().top <= 140) active = heading.id; }
+      links.forEach(link => { if (decodeURIComponent(link.hash) === '#' + active) link.setAttribute('aria-current', 'location'); else link.removeAttribute('aria-current'); });
+    };
+    window.addEventListener('scroll', update, { passive: true });
+    window.addEventListener('resize', update);
+    article.addEventListener('toggle', update, true);
+    const drawer = document.querySelector<HTMLDialogElement>('#mobile-toc')!;
+    document.querySelector('#open-toc')!.addEventListener('click', () => drawer.showModal());
+    document.querySelector('#close-toc')!.addEventListener('click', () => drawer.close());
+    drawer.querySelectorAll('a').forEach(link => link.addEventListener('click', () => drawer.close()));
+    drawer.addEventListener('click', event => { if (event.target === drawer && event.clientX > drawer.getBoundingClientRect().right) drawer.close(); });
+    const narrow = matchMedia('(max-width: 640px)');
+    narrow.addEventListener('change', () => { if (!narrow.matches && drawer.open) drawer.close(); });
+    update();
+  </script>
+</Base>
+
+<style>
+  .article-shell.shell{max-width:1160px}
+  .article-grid{display:grid;grid-template-columns:180px minmax(0,1fr);gap:48px;align-items:start}
+  .article-main{min-width:0}
+  #article-body{counter-reset:chapter}
+  #article-body :global(h2[id]){counter-increment:chapter;counter-reset:subsection;display:flex;align-items:baseline;gap:10px}
+  #article-body :global(h2[id]::before){content:counter(chapter,decimal-leading-zero);font:12px var(--mono);color:var(--accent);flex:0 0 24px}
+  #article-body :global(h3[id]){counter-increment:subsection}
+  #article-body :global(h3[id]::before){content:counter(chapter) "." counter(subsection);font:10px var(--mono);color:var(--accent);margin-right:10px}
+  .toc-number{font:9px/2 var(--mono);color:inherit;opacity:.8}
+  .reading-sidebar nav a,.mobile-toc-links a{display:grid;grid-template-columns:22px minmax(0,1fr);gap:6px}
+  .reading-sidebar{position:sticky;top:28px;padding:8px 0 0;order:0;width:auto}
+  .reading-sidebar .toc{padding:0;border:0;background:none}
+  .toc-title{font-size:11px;font-weight:600;color:var(--accent);margin:0 0 18px}
+  .reading-sidebar nav{display:flex;flex-direction:column;gap:12px;max-height:calc(100dvh - 120px);overflow-y:auto;padding-right:8px}
+  .reading-sidebar a{font-size:11px}
+  .article-header{padding-top:28px}
+  .mobile-toc-toggle{display:none}
+  .toc-drawer{position:fixed;inset:0 auto 0 0;margin:0;width:min(300px,85vw);height:100dvh;max-height:100dvh;max-width:100vw;border:0;border-right:1px solid var(--line);background:var(--paper);color:var(--ink);padding:24px}
+  .toc-drawer::backdrop{background:#10201866}
+  .drawer-heading{display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid var(--line);padding-bottom:14px;margin-bottom:20px}
+  .drawer-heading h2{font-size:15px;margin:0}
+  .drawer-heading button{background:none;border:0;font-size:26px;padding:0 6px;color:var(--muted)}
+  .mobile-toc-links{display:flex;flex-direction:column;gap:16px}
+  .mobile-toc-links a{font-size:12px;color:var(--muted);line-height:1.8}
+  .mobile-toc-links a[aria-current]{color:var(--accent)}
+  .mobile-toc-links .sub{padding-left:12px}
+  @media(min-width:641px) and (max-width:1000px){.article-grid{grid-template-columns:140px minmax(0,1fr);gap:28px}.reading-sidebar a{font-size:10px}.reading-sidebar nav{padding-left:10px;gap:10px}}
+  @media(max-width:640px){
+    .article-grid{display:block}.reading-sidebar{display:none}.article-header{padding-top:24px}
+    .mobile-toc-toggle{display:block;position:fixed;left:16px;bottom:20px;z-index:8;background:var(--surface);border:1px solid var(--line);border-radius:5px;box-shadow:0 3px 14px #0001;color:var(--accent);padding:11px 15px;font-size:12px}
+    .article-bottom{padding-bottom:65px}
+  }
+</style>

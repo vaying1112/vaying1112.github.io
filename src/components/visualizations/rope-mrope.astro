@@ -1,0 +1,43 @@
+---
+interface Props { key?: [number, number, number]; }
+const { key = [0, 1, 0] } = Astro.props;
+if (key.length !== 3 || key.some(value => value !== 0 && value !== 1)) throw new Error('M-RoPE grid coordinates must be 0 or 1.');
+const coordinates = Array.from({ length: 8 }, (_, i) => [Math.floor(i / 4), Math.floor(i / 2) % 2, i % 2]);
+const axes = ['t', 'h', 'w'];
+---
+<rope-mrope aria-label="M-RoPE 时空坐标实验">
+  <p class="scope">查询固定在 (0, 0, 0)。选择键的位置；三组频率均为 0.4，分别使用 t、h、w。</p>
+  <div class="frames">{[0, 1].map(t => <div><strong>帧 t = {t}</strong><div class="grid">{coordinates.filter(p => p[0] === t).map(p => <button type="button" data-coordinate={p.join(',')} aria-label={`键坐标 (${p.join(', ')})`} aria-pressed={p.every((value, i) => value === key[i])}><span>h = {p[1]}，w = {p[2]}</span></button>)}</div></div>)}</div>
+  <p class="coordinate" aria-live="polite">坐标差 Δ(t, h, w) = <strong data-coordinate-value>({key.join(', ')})</strong></p>
+  <div class="planes">{axes.map((axis, r) => <div data-axis={r}><strong>{axis} 轴 · 第 {r} 组</strong><svg viewBox="0 0 120 110" role="img" aria-label={`${axis} 轴的相对旋转`}><circle cx="60" cy="55" r="38"/><path d="M12 55H108M60 8V102"/><line x1="60" y1="55" x2="98" y2="55" class="query"/><line data-vector x1="60" y1="55" x2={60 + 38 * Math.cos(key[r] * 0.4)} y2={55 - 38 * Math.sin(key[r] * 0.4)}/></svg><span data-phase>Δ{axis}ω = {(key[r] * 0.4).toFixed(1)}</span><span data-part>点积 = {Math.cos(key[r] * 0.4).toFixed(4)}</span></div>)}</div>
+  <p class="result">三组点积之和：<strong data-score>{key.reduce((sum, value) => sum + Math.cos(value * 0.4), 0).toFixed(4)}</strong></p>
+</rope-mrope>
+<script>
+  class RopeMrope extends HTMLElement {
+    private events?: AbortController;
+    connectedCallback() {
+      if (this.events) return;
+      this.events = new AbortController(); const { signal } = this.events;
+      this.querySelectorAll<HTMLButtonElement>('[data-coordinate]').forEach(button => button.addEventListener('click', () => {
+        const coordinate = button.dataset.coordinate!.split(',').map(Number);
+        this.querySelectorAll('[data-coordinate]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+        this.querySelector('[data-coordinate-value]')!.textContent = `(${coordinate.join(', ')})`;
+        this.querySelectorAll<HTMLElement>('[data-axis]').forEach((plane, r) => {
+          const angle = coordinate[r] * 0.4, vector = plane.querySelector('[data-vector]')!;
+          vector.setAttribute('x2', String(60 + 38 * Math.cos(angle))); vector.setAttribute('y2', String(55 - 38 * Math.sin(angle)));
+          plane.querySelector('[data-phase]')!.textContent = `Δ${['t','h','w'][r]}ω = ${angle.toFixed(1)}`;
+          plane.querySelector('[data-part]')!.textContent = `点积 = ${Math.cos(angle).toFixed(4)}`;
+        });
+        this.querySelector('[data-score]')!.textContent = coordinate.reduce((sum, value) => sum + Math.cos(value * 0.4), 0).toFixed(4);
+      }, { signal }));
+    }
+    disconnectedCallback() { this.events?.abort(); this.events = undefined; }
+  }
+  if (!customElements.get('rope-mrope')) customElements.define('rope-mrope', RopeMrope);
+</script>
+<style>
+  rope-mrope{display:block;padding:20px;background:var(--surface);border:1px solid var(--line)}
+  .scope{font-size:11px;color:var(--muted);line-height:1.8;margin:0 0 18px}.frames{display:grid;grid-template-columns:1fr 1fr;gap:20px}.frames strong{font-size:11px;font-weight:500;color:var(--accent)}.grid{display:grid;grid-template-columns:1fr 1fr;gap:5px;margin-top:8px}.grid button{padding:12px 4px;border:1px solid var(--line);background:var(--paper);font-size:10px}.grid button[aria-pressed=true]{background:var(--accent-soft);color:var(--accent);border-color:var(--accent)}
+  .coordinate{font-size:11px;text-align:center;color:var(--muted);margin:20px 0 10px}.coordinate strong{font-family:var(--mono);color:var(--accent)}.planes{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px}.planes>div{text-align:center}.planes strong{font-size:10px;color:var(--accent);font-weight:500}.planes svg{display:block;width:100%;height:auto}.planes span{display:block;font:9px/1.8 var(--mono);color:var(--muted)}circle,path{fill:none;stroke:var(--line)}line{stroke:var(--accent);stroke-width:2}.query{stroke:var(--warm);stroke-dasharray:3 2;stroke-width:1.5}.result{font-size:11px;text-align:center;margin:20px 0 0;color:var(--muted)}.result strong{font:20px var(--mono);color:var(--accent)}
+  @container experiment (max-width:420px){.frames{gap:10px}.grid button{font-size:9px}.planes{gap:3px}}
+</style>

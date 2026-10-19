@@ -1,0 +1,15 @@
+---
+import { getCollection, render } from 'astro:content';
+import type { CollectionEntry } from 'astro:content';
+import Reading from '../../layouts/Reading.astro';
+import { showDrafts } from '../../site';
+export async function getStaticPaths() {
+  const posts = await getCollection('posts', ({ data }) => showDrafts || !data.draft);
+  return posts.map(post => ({ params: { id: post.id }, props: { post } }));
+}
+interface Props { post: CollectionEntry<'posts'>; }
+const { post } = Astro.props;
+const { Content, headings } = await render(post);
+const minutes = Math.max(1, Math.ceil((post.body || '').length / 450));
+---
+<Reading title={post.data.title} description={post.data.description} date={post.data.date} minutes={minutes} tags={post.data.tags} draft={post.data.draft} headings={headings}><Content /></Reading>

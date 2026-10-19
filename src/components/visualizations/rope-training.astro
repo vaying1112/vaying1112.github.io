@@ -1,0 +1,64 @@
+---
+import { phaseState } from '../../visualizations/rope-math';
+import { checkNumber } from '../../visualizations/registry';
+interface Props { beta?: number; target?: number; }
+const { beta = 0.4, target = -3 } = Astro.props;
+checkNumber('beta', beta, -Math.PI, Math.PI);
+checkNumber('target', target, -8, 0, true);
+const state = phaseState(beta, target);
+---
+<rope-training data-initial-beta={beta} data-initial-target={target} aria-label="内容相位训练实验">
+  <p class="scope">固定 ω = 0.4，只学习内容相位 β；候选相对位置为 −8 到 0。</p>
+  <div class="controls"><label>内容相位 β <output data-beta-value>{beta.toFixed(4)}</output><input type="range" min={-Math.PI} max={Math.PI} step="any" value={beta} data-beta /></label><label>目标位置 <select data-target>{state.deltas.map(delta => <option value={delta} selected={delta === target}>{delta}</option>)}</select></label></div>
+  <svg viewBox="0 0 480 230" role="img" aria-label="各相对位置经过 softmax 后的注意力概率">
+    <path d="M34 20V190H465" class="axis"/><text x="2" y="24">40%</text><text x="8" y="108">20%</text><path d="M34 105H465" class="grid"/>
+    {state.deltas.map((delta, i) => <g data-bar={delta}><rect x={46 + i * 46} y={190 - state.probabilities[i] * 425} width="25" height={state.probabilities[i] * 425} class:list={{ selected: delta === target }}/><text x={58 + i * 46} y="210" text-anchor="middle">{delta}</text><text data-prob x={58 + i * 46} y={182 - state.probabilities[i] * 425} text-anchor="middle">{(state.probabilities[i] * 100).toFixed(1)}%</text></g>)}
+  </svg>
+  <div class="metrics" aria-live="polite"><span>交叉熵 L<strong data-loss>{state.loss.toFixed(4)}</strong></span><span>梯度 ∂L/∂β<strong data-gradient>{state.gradient.toFixed(4)}</strong></span></div>
+  <div class="actions"><button type="button" data-step>一步梯度下降</button><button type="button" data-reset>重置</button><span>学习率 η = 0.5</span></div>
+</rope-training>
+<script>
+  import { phaseState } from '../../visualizations/rope-math';
+  class RopeTraining extends HTMLElement {
+    private events?: AbortController;
+    connectedCallback() {
+      if (this.events) return;
+      this.events = new AbortController(); const { signal } = this.events;
+      const beta = this.querySelector<HTMLInputElement>('[data-beta]')!;
+      const target = this.querySelector<HTMLSelectElement>('[data-target]')!;
+      const update = () => {
+        const state = phaseState(Number(beta.value), Number(target.value));
+        this.querySelector('[data-beta-value]')!.textContent = Number(beta.value).toFixed(4);
+        this.querySelector('[data-loss]')!.textContent = state.loss.toFixed(4);
+        this.querySelector('[data-gradient]')!.textContent = state.gradient.toFixed(4);
+        this.querySelectorAll<SVGGElement>('[data-bar]').forEach((bar, i) => {
+          const probability = state.probabilities[i], rect = bar.querySelector('rect')!, label = bar.querySelector('[data-prob]')!;
+          rect.setAttribute('y', String(190 - probability * 425)); rect.setAttribute('height', String(probability * 425));
+          rect.classList.toggle('selected', state.deltas[i] === Number(target.value));
+          label.setAttribute('y', String(182 - probability * 425)); label.textContent = `${(probability * 100).toFixed(1)}%`;
+        });
+      };
+      beta.addEventListener('input', update, { signal }); target.addEventListener('change', update, { signal });
+      this.querySelector('[data-step]')!.addEventListener('click', () => {
+        const state = phaseState(Number(beta.value), Number(target.value));
+        const next = Number(beta.value) - 0.5 * state.gradient;
+        beta.value = String(Math.atan2(Math.sin(next), Math.cos(next))); update();
+      }, { signal });
+      this.querySelector('[data-reset]')!.addEventListener('click', () => {
+        beta.value = this.dataset.initialBeta!; target.value = this.dataset.initialTarget!; update();
+      }, { signal });
+      update();
+    }
+    disconnectedCallback() { this.events?.abort(); this.events = undefined; }
+  }
+  if (!customElements.get('rope-training')) customElements.define('rope-training', RopeTraining);
+</script>
+<style>
+  rope-training{display:block;padding:20px;background:var(--surface);border:1px solid var(--line);font-size:11px}
+  .scope{font-size:11px;color:var(--muted);margin:0 0 18px;line-height:1.8}
+  .controls{display:flex;gap:24px;align-items:center}.controls>label:first-child{flex:1}.controls label{font-size:11px}output{float:right;font-family:var(--mono);color:var(--accent)}
+  select{background:var(--paper);color:var(--ink);border:1px solid var(--line);padding:5px;font:11px var(--mono)}
+  svg{display:block;width:100%;height:auto;margin:15px 0}svg text{fill:var(--muted);font:9px var(--mono)}.axis{fill:none;stroke:var(--muted);stroke-width:.7}.grid{fill:none;stroke:var(--line);stroke-dasharray:3 4}rect{fill:var(--accent);opacity:.45}rect.selected{fill:var(--warm);opacity:1}
+  .metrics{display:flex;gap:30px;border-top:1px solid var(--line);padding-top:15px}.metrics span{color:var(--muted);font-size:10px}.metrics strong{display:block;color:var(--accent);font:20px/1.8 var(--mono)}
+  .actions{display:flex;gap:12px;align-items:center;flex-wrap:wrap;margin-top:16px}.actions button{border:1px solid var(--line);background:var(--paper);padding:8px 12px;font-size:11px}.actions span{color:var(--muted);font-size:10px}
+</style>

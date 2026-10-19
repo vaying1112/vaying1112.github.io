@@ -1,0 +1,11 @@
+<div class="qa-tools"><span data-qa-count></span><div><button type="button" data-qa-open>全部展开</button><button type="button" data-qa-close>全部收起</button></div></div>
+<script>
+  const questions = [...document.querySelectorAll<HTMLDetailsElement>('.qa-item')];
+  const count = document.querySelector('[data-qa-count]');
+  if (count) count.textContent = `${questions.length} 个问题`;
+  document.querySelector('[data-qa-open]')?.addEventListener('click', () => questions.forEach(question => question.open = true));
+  document.querySelector('[data-qa-close]')?.addEventListener('click', () => questions.forEach(question => question.open = false));
+  const reveal = () => { const id = decodeURIComponent(location.hash.slice(1)); const question = questions.find(item => item.id === id); if (question) { question.open = true; question.scrollIntoView({ block: 'start' }); } };
+  window.addEventListener('hashchange', reveal);
+  reveal();
+</script>

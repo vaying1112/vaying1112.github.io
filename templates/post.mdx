@@ -1,0 +1,47 @@
+---
+title: 文章标题
+description: 用一句话说明要解释的问题。
+date: 2026-10-19T12:00:00+08:00
+tags: [数学]
+draft: true
+visualizations: [rope-rotation]
+---
+
+import Visualization from '../../components/Visualization.astro';
+import Question from '../../components/Question.astro';
+import { href } from '../../site';
+
+在这里介绍问题。需要时引用<a href={href('math/#complex')}>复数基础</a>。
+
+## 视角一
+
+解释这个视角揭示的关系，再写公式。例如：
+
+$$
+s = \cos((n-m)\omega).
+$$
+
+```python
+import torch
+m, n, omega = 2, 5, 0.4
+print(torch.cos(torch.tensor((n - m) * omega)))
+```
+
+调整下方参数，核对公式和代码的结果。
+
+<Visualization id="rope-rotation" options={{ m: 2, n: 5, omega: 0.4 }} />
+
+## 视角二
+
+从另一种表示或实现解释同一个机制，并给出对应代码和实验。
+
+## 参考资料
+
+链接到论文、原始代码或官方文档。
+
+## 关键问答
+
+<Question id="qa-example" number={1} question="在这里写归纳后的问题？">
+在这里写答案。
+</Question>
+

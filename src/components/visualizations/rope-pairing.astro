@@ -1,0 +1,37 @@
+<rope-pairing aria-label="通道配对与布局重排">
+  <div class="modes"><button type="button" data-mode="adjacent" aria-pressed="true">相邻布局</button><button type="button" data-mode="half" aria-pressed="false">前后半区布局</button></div>
+  <svg viewBox="0 0 480 150" role="img" aria-label="四个实数坐标的两种排列，颜色表示同一个二维组">
+    <path data-pair-a d="M60 80Q120 0 180 80" class="pair-a"/><path data-pair-b d="M300 80Q360 0 420 80" class="pair-b"/>
+    {[0,1,2,3].map((i) => <g data-cell={i}><rect x={30 + i * 120} y="80" width="60" height="40" rx="3" class:list={{ 'pair-a': i < 2, 'pair-b': i >= 2 }}/><text data-name x={60 + i * 120} y="105" text-anchor="middle">{['a₀','b₀','a₁','b₁'][i]}</text><text class="index" x={60 + i * 120} y="142" text-anchor="middle">存储位置 {i}</text></g>)}
+  </svg>
+  <p data-pair-description>第 0 组：位置 0、1；第 1 组：位置 2、3。</p>
+</rope-pairing>
+<script>
+  class RopePairing extends HTMLElement {
+    private events?: AbortController;
+    connectedCallback() {
+      if (this.events) return;
+      this.events = new AbortController(); const { signal } = this.events;
+      this.querySelectorAll<HTMLButtonElement>('[data-mode]').forEach(button => button.addEventListener('click', () => {
+        const half = button.dataset.mode === 'half';
+        const order = half ? [0,2,1,3] : [0,1,2,3];
+        this.querySelectorAll('[data-mode]').forEach(item => item.setAttribute('aria-pressed', String(item === button)));
+        this.querySelectorAll('[data-cell]').forEach((cell, i) => {
+          cell.querySelector('[data-name]')!.textContent = ['a₀','b₀','a₁','b₁'][order[i]];
+          cell.querySelector('rect')!.setAttribute('class', order[i] < 2 ? 'pair-a' : 'pair-b');
+        });
+        this.querySelector('[data-pair-a]')!.setAttribute('d', half ? 'M60 80Q180 -25 300 80' : 'M60 80Q120 0 180 80');
+        this.querySelector('[data-pair-b]')!.setAttribute('d', half ? 'M180 80Q300 -25 420 80' : 'M300 80Q360 0 420 80');
+        this.querySelector('[data-pair-description]')!.textContent = half ? '第 0 组：位置 0、2；第 1 组：位置 1、3。原来的二维组不变，只改变存储顺序。' : '第 0 组：位置 0、1；第 1 组：位置 2、3。';
+      }, { signal }));
+    }
+    disconnectedCallback() { this.events?.abort(); this.events = undefined; }
+  }
+  if (!customElements.get('rope-pairing')) customElements.define('rope-pairing', RopePairing);
+</script>
+<style>
+  rope-pairing{display:block;background:var(--surface);padding:20px;border:1px solid var(--line)}
+  .modes{display:flex;gap:8px}.modes button{border:1px solid var(--line);background:var(--paper);font-size:10px;padding:7px 12px}.modes button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}
+  svg{display:block;width:100%;height:auto;margin-block:15px}path{fill:none;stroke-width:1.5}path.pair-a{stroke:var(--accent)}path.pair-b{stroke:var(--warm)}rect{fill:var(--paper);stroke-width:1.5}rect.pair-a{stroke:var(--accent)}rect.pair-b{stroke:var(--warm)}text{fill:var(--ink);font:15px Georgia,serif}.index{font:9px var(--mono);fill:var(--muted)}
+  p{font-size:11px;line-height:1.9;color:var(--muted);margin:0}
+</style>

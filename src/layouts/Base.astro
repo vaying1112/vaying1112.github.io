@@ -1,0 +1,101 @@
+---
+import '../styles/global.css';
+import 'katex/dist/katex.min.css';
+import Icon from '../components/Icon.astro';
+import { siteConfig, href } from '../site';
+interface Props { title?: string; description?: string; noindex?: boolean; }
+const { title, description = siteConfig.description, noindex = false } = Astro.props;
+const pageTitle = title ? `${title} · ${siteConfig.title}` : `${siteConfig.title} · 数学与模型的学习笔记`;
+const canonical = Astro.site && !noindex ? new URL(Astro.url.pathname, Astro.site) : undefined;
+const path = Astro.url.pathname;
+---
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="light dark" />
+    {noindex && <meta name="robots" content="noindex,nofollow" />}
+    {canonical && <link rel="canonical" href={canonical} />}
+    <meta property="og:title" content={pageTitle} />
+    <meta property="og:description" content={description} />
+    <meta property="og:type" content="website" />
+    <link rel="icon" type="image/svg+xml" href={href('favicon.svg')} />
+    <link rel="alternate" type="application/rss+xml" title={siteConfig.title} href={href('rss.xml')} />
+    <title>{pageTitle}</title>
+    <script is:inline>
+      try { const saved = localStorage.getItem('notes-theme'); document.documentElement.dataset.theme = saved || (matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'); } catch {}
+    </script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main">跳到正文</a>
+    <header class="site-header shell">
+      <a class="brand" href={href()} aria-label={`${siteConfig.title} 首页`}>
+        <img class="brand-bookmark" src={href('favicon.svg')} width="31" height="36" alt="" aria-hidden="true" />
+        <span>{siteConfig.title}</span>
+      </a>
+      <nav class="main-nav" aria-label="主导航">
+        <a href={href()} aria-current={path === href() || path.startsWith(href('posts/')) ? 'page' : undefined}>文章</a>
+        <a href={href('math/')} aria-current={path === href('math/') ? 'page' : undefined}>数学基础</a>
+        <a href={href('lab/')} aria-current={path.startsWith(href('lab/')) ? 'page' : undefined}>实验室</a>
+      </nav>
+      <div class="header-actions">
+        <button class="icon-button" id="open-search" aria-label="搜索文章" title="搜索文章（/）"><Icon name="search" /></button>
+        <button class="icon-button" id="theme-toggle" aria-label="切换深色模式" title="切换深色模式"><span class="moon-icon"><Icon name="moon" /></span><span class="sun-icon"><Icon name="sun" /></span></button>
+      </div>
+    </header>
+    <main id="main"><slot /></main>
+    <footer class="site-footer shell">
+      <a class="footer-name" href={href()}>{siteConfig.title}</a>
+      <div class="footer-links"><a href={href('rss.xml')}><Icon name="rss" size={15} /> RSS</a><a href="#top">回到顶部 ↑</a></div>
+    </footer>
+    <dialog id="search-dialog" class="search-dialog" data-index={href('search-index.json')} aria-labelledby="search-title">
+      <div class="search-heading"><h2 id="search-title">搜索笔记</h2><button class="icon-button" id="close-search" aria-label="关闭搜索"><Icon name="close" /></button></div>
+      <label class="search-input-wrap"><Icon name="search" /><span class="sr-only">输入关键词</span><input id="search-input" type="search" placeholder="输入标题、内容或标签…" autocomplete="off" /></label>
+      <p id="search-status" class="muted" role="status">输入关键词，查找笔记。</p>
+      <ul id="search-results" class="search-results"></ul>
+      <div class="search-hint">按 Esc 关闭</div>
+    </dialog>
+    <script>
+      const toggle = document.querySelector<HTMLButtonElement>('#theme-toggle')!;
+      const syncTheme = () => { const dark = document.documentElement.dataset.theme === 'dark'; toggle.setAttribute('aria-label', dark ? '切换浅色模式' : '切换深色模式'); toggle.title = toggle.getAttribute('aria-label')!; };
+      syncTheme();
+      toggle.addEventListener('click', () => { const next = document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'; document.documentElement.dataset.theme = next; try { localStorage.setItem('notes-theme', next); } catch {} syncTheme(); });
+      const dialog = document.querySelector<HTMLDialogElement>('#search-dialog')!;
+      const input = document.querySelector<HTMLInputElement>('#search-input')!;
+      const status = document.querySelector<HTMLElement>('#search-status')!;
+      const results = document.querySelector<HTMLElement>('#search-results')!;
+      type SearchEntry = { title: string; description: string; url: string; tags: string[]; content: string; draft: boolean };
+      let entries: SearchEntry[] | null = null;
+      let loading: Promise<void> | null = null;
+      let loadFailed = false;
+      function search() {
+        const query = input.value.trim().toLocaleLowerCase();
+        results.replaceChildren();
+        if (loadFailed) { status.textContent = '搜索暂时无法加载，请关闭后重试。'; return; }
+        if (!entries) { status.textContent = '正在加载笔记…'; return; }
+        if (!query) { status.textContent = '输入关键词，查找笔记。'; return; }
+        const words = query.split(/\s+/);
+        const matched = entries.filter(e => words.every(word => `${e.title} ${e.description} ${e.tags.join(' ')} ${e.content}`.toLocaleLowerCase().includes(word)));
+        status.textContent = matched.length ? `找到 ${matched.length} 篇笔记` : '没有找到相关笔记，试试其他关键词。';
+        matched.forEach(e => { const li = document.createElement('li'); const a = document.createElement('a'); a.href = e.url; const title = document.createElement('strong'); title.textContent = e.title + (e.draft ? ' · 草稿' : ''); const desc = document.createElement('span'); desc.textContent = e.description; a.append(title, desc); li.append(a); results.append(li); });
+      }
+      async function openSearch() {
+        if (!dialog.open) dialog.showModal();
+        input.focus();
+        if (!entries && !loading) {
+          loadFailed = false;
+          loading = (async () => { try { const response = await fetch(dialog.dataset.index!); if (!response.ok) throw new Error('HTTP ' + response.status); entries = await response.json(); } catch { loadFailed = true; } finally { loading = null; search(); } })();
+        }
+        search();
+      }
+      document.querySelector('#open-search')!.addEventListener('click', openSearch);
+      document.querySelector('#close-search')!.addEventListener('click', () => dialog.close());
+      dialog.addEventListener('click', e => { if (e.target === dialog) { const box = dialog.getBoundingClientRect(); if (e.clientX < box.left || e.clientX > box.right || e.clientY < box.top || e.clientY > box.bottom) dialog.close(); } });
+      input.addEventListener('input', search);
+      document.addEventListener('keydown', e => { if (e.key === '/' && !(e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || (e.target instanceof HTMLElement && e.target.isContentEditable))) { e.preventDefault(); openSearch(); } });
+      document.querySelectorAll<HTMLPreElement>('.prose pre').forEach(pre => { const button = document.createElement('button'); button.className = 'copy-code'; button.textContent = '复制'; button.setAttribute('aria-label', '复制代码'); button.addEventListener('click', async () => { try { await navigator.clipboard.writeText(pre.querySelector('code')?.textContent || ''); button.textContent = '已复制'; } catch { button.textContent = '复制失败'; } setTimeout(() => button.textContent = '复制', 1800); }); pre.append(button); });
+    </script>
+  </body>
+</html>

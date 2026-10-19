@@ -1,0 +1,8 @@
+---
+import Base from '../layouts/Base.astro';
+import { href } from '../site';
+---
+<Base title="关于这个博客">
+  <div id="top"></div><section class="compact-heading shell"><h1>关于</h1></section>
+  <div class="prose shell brief-about"><p>数学、模型原理与代码笔记。</p><p><a href={href()}>文章与可视化</a> · <a href={href('rss.xml')}>RSS</a></p></div>
+</Base>

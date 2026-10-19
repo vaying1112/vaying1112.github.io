@@ -1,0 +1,41 @@
+---
+import type { AstroComponentFactory } from 'astro/runtime/server/index.js';
+import { visualizations, type VisualizationId, type VisualizationOptions } from '../visualizations/registry';
+import { href } from '../site';
+
+type Props = { [K in VisualizationId]: {
+  id: K;
+  options?: VisualizationOptions[K];
+  anchor?: string;
+  standalone?: boolean;
+}}[VisualizationId];
+
+const { id, options = {}, anchor, standalone = false } = Astro.props;
+const entry = visualizations[id];
+if (!entry) throw new Error(`Unknown visualization: ${id}`);
+const components = import.meta.glob<{ default: AstroComponentFactory }>('./visualizations/*.astro');
+const load = components[`./visualizations/${id}.astro`];
+if (!load) throw new Error(`Missing visualization component: ${id}`);
+const { default: Experiment } = await load();
+---
+<figure class="visualization" id={anchor} data-visualization={id} aria-label={entry.title}>
+  <figcaption class="visualization-heading"><strong>{entry.title}</strong>{!standalone && <a href={href(`lab/${id}/`)}>单独打开 ↗</a>}</figcaption>
+  <Experiment {...options} />
+  <noscript><p class="visualization-fallback">当前为初始状态；启用 JavaScript 后可拖动参数。</p></noscript>
+</figure>
+
+<style>
+  .visualization{margin:28px 0;min-width:0;scroll-margin-top:24px;container-type:inline-size;container-name:experiment}
+  .visualization-heading{display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-bottom:12px;font-size:12px;line-height:1.8}
+  .visualization-heading strong{font-weight:500;color:var(--accent)}
+  .visualization-heading a{font-size:10px;color:var(--muted);white-space:nowrap;text-decoration:none}
+  .visualization-heading a:hover{color:var(--accent)}
+  .visualization-fallback{font-size:11px;color:var(--muted)}
+  .visualization :global(.rope-lab),.visualization :global(.frequency-lab){margin:0}
+  @container experiment (max-width:640px){
+    .visualization :global(.rope-lab){grid-template-columns:1fr}
+    .visualization :global(.lab-visual){border-right:0;border-bottom:1px solid var(--line)}
+    .visualization :global(.lab-svg){max-height:280px}
+    .visualization :global(.lab-formula){font-size:10px}
+  }
+</style>

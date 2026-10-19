@@ -1,0 +1,455 @@
+---
+title: RoPE 原理与问答
+description: 用公式、PyTorch 代码与交互图，从矩阵、复数、频率、训练和工程实现理解 RoPE。
+date: 2026-10-19T01:00:00+08:00
+tags: [Transformer, 数学]
+draft: true
+visualizations: [rope-rotation, rope-frequencies, rope-training, rope-partial, rope-mrope, rope-pairing]
+---
+
+import CodeExample from '../../components/CodeExample.astro';
+import { ropeCode } from '../../examples/rope';
+import Visualization from '../../components/Visualization.astro';
+import Question from '../../components/Question.astro';
+import QuestionTools from '../../components/QuestionTools.astro';
+import { href } from '../../site';
+
+RoPE 对 Q、K 施加位置相关的旋转，使注意力点积显式依赖相对位置。下面按矩阵、复数、频率、训练和工程实现展开：每个视角先看公式，再对照 PyTorch 代码，最后调整交互图中的同一组参数。
+
+<p className="article-jumps"><a href="#代码与运行">完整代码</a> · <a href={href('math/')}>数学基础</a> · <a href="#关键问答">Q&A</a> · <a href="#模型参数快照">模型参数</a></p>
+
+## 代码与运行
+
+<a href={href('examples/rope-torch.py')}>下载完整 PyTorch 脚本</a>，执行 `python -m pip install torch` 安装依赖后，运行 `python rope_torch.py`。各节片段来自同一份源码，共用 `import math`、`import torch` 与 `import torch.nn.functional as F`；后文会复用前面定义的函数。脚本末尾包含数值与梯度验证。另附<a href={href('examples/rope-numpy.py')}>NumPy 对照版</a>。
+
+完整脚本已在 Python 3.12 与 PyTorch 2.14.1 的 CPU 环境运行。代码、默认交互状态和运行结果使用相同参数。改动页面滑块只会更新本地实验；下载脚本后可修改对应变量复现。
+
+## 符号
+
+| 符号 | 含义 |
+| --- | --- |
+| $m,n$ | 查询与键的 token 位置 |
+| $q_m=W_Qx_m,\ k_n=W_Kx_n$ | 旋转前的内容向量 |
+| $d_h$ | 一个注意力头用于 Q/K 点积的维度 |
+| $d_{\rm rot}$ | 参与旋转的实数维度，通常为偶数 |
+| $r=0,\ldots,d_{\rm rot}/2-1$ | 二维通道组编号 |
+| $\omega_r$ | 第 $r$ 组每个位置增加的相位 |
+| $B$ | 频率底数，配置中常叫 rope_theta |
+| $\Delta=n-m$ | 本文采用的相对位置方向 |
+
+前置推导单独放在<a href={href('math/')}>数学基础</a>，可按需查阅，不需要先学习完整的群论或傅里叶分析。
+
+## 矩阵视角与相对位置
+
+二维旋转矩阵为：
+
+$$
+R(\phi)=
+\begin{pmatrix}
+\cos\phi&-\sin\phi\\
+\sin\phi&\cos\phi
+\end{pmatrix}.
+$$
+
+它满足两个性质：转置等于反向旋转，连续旋转的角度相加。因此：
+
+$$
+R(a)^\top R(b)=R(-a)R(b)=R(b-a).
+$$
+
+对位置 $m,n$ 分别旋转后，点积变成：
+
+$$
+\begin{aligned}
+\widetilde q_m&=R(m\omega)q_m,\qquad
+\widetilde k_n=R(n\omega)k_n,\\
+\widetilde q_m^\top\widetilde k_n
+&=q_m^\top R(m\omega)^\top R(n\omega)k_n\\
+&=q_m^\top R((n-m)\omega)k_n.
+\end{aligned}
+$$
+
+这就是显式相对位置项的来源。同时，$R(\phi)^\top R(\phi)=I$，所以旋转保持每个向量的长度，不会把低频通道自动乘上更小的权重。[RoFormer §3.2](https://arxiv.org/html/2104.09864v5)
+
+固定 $q=k=(1,0)$、$m=2,n=5,\omega=0.4$，矩阵乘法和相对旋转应给出同一个分数：
+
+<CodeExample code={ropeCode.matrix} output="matrix: 0.3624" />
+
+在图中点击“两者一起 +1”，两条向量一起转，但夹角和分数不变：
+
+<Visualization id="rope-rotation" anchor="rotation-experiment" />
+
+实际内容向量随输入和上下文变化；“只依赖相对位置”指这里新增的旋转项，不表示整个模型对绝对位置完全不敏感。
+
+## 复数视角与相位差
+
+把 $(a,b)$ 对应为 $z=a+ib$。由欧拉公式，乘上 $e^{i\phi}$ 等价于二维旋转。实内积可写成 $\operatorname{Re}(z_q\overline{z_k})$，于是：
+
+$$
+\operatorname{Re}\left[
+(z_qe^{im\omega})\overline{(z_ke^{in\omega})}
+\right]
+=
+\operatorname{Re}\left[
+z_q\overline{z_k}e^{i(m-n)\omega}
+\right].
+$$
+
+矩阵式出现 $n-m$，这个复数式出现 $m-n$，两者计算的是同一个实内积，差别来自共轭的放置方式。
+
+`torch.polar(1, φ)` 构造 $e^{i\phi}$，`.conj()` 取共轭，`.real` 取实部。下面仍计算上一节的同一对向量：
+
+<CodeExample code={ropeCode.complex} output="complex: 0.3624" />
+
+<Visualization id="rope-rotation" anchor="complex-experiment" />
+
+此时图中的横纵坐标就是实部、虚部。矩阵乘法和复数乘法是同一旋转的两种写法。
+
+
+若进一步要求整个复数乘积依赖相对位置，并设 $f(z,0)=z$，就能沿苏剑林博客的路线构造出：
+
+$$
+f(z,m)=ze^{im\omega}.
+$$
+
+其中的固定频率来自“相邻位置增加相同相位”。这个更强的构造条件，不等于从实内积的相对位置目标唯一推出 RoPE；完整步骤见[复数构造的条件](#qa-complex-proof)。[苏剑林的原文](https://spaces.ac.cn/archives/8265)
+
+## 多通道与频率
+
+一个 $d_{\rm rot}$ 维实向量拆成 $d_{\rm rot}/2$ 个二维组，每组独立旋转。例如四维向量分成 $(q_0,q_1)$、$(q_2,q_3)$ 两组。整体变换是分块对角矩阵：
+
+$$
+\mathcal R_m=
+\operatorname{diag}\left(
+R(m\omega_0),R(m\omega_1),\ldots
+\right).
+$$
+
+由于内积可以按组求和，每组都保留相对位置性质：
+
+$$
+(\mathcal R_mq)^\top(\mathcal R_nk)
+=\sum_r (q^{(r)})^\top
+R(\Delta\omega_r)k^{(r)}.
+$$
+
+普通 RoPE 的频率安排为：
+
+$$
+\omega_r=B^{-2r/d_{\rm rot}},\qquad
+\phi_{m,r}=m\omega_r.
+$$
+
+$m$ 累积相位，$r$ 选择频率。代码把最后一维重排为二维组，再用 `view_as_complex` 变成复数；`phase` 的位置轴与组轴分别保留。
+
+<CodeExample code={ropeCode.frequencies} output={'omega: [1.0, 0.1, 0.01, 0.001]\nphase: [8.0, 0.8, 0.08, 0.008]'} />
+
+本例张量布局为 `[batch, heads, seq, dim]`，位置为 `[seq]`。相位表 `[seq, d_rot/2]` 会沿 batch 和 heads 广播；改变位置不改变频率表。`d_rot` 小于头维度时，函数直接拼回未旋转的尾部。
+
+
+<Visualization id="rope-frequencies" anchor="frequency-experiment" />
+
+这里的指数分配等价于对数频率等间隔，相邻频率比为 $B^{-2/d_{\rm rot}}$，用于覆盖不同变化尺度。它沿用了 Transformer 正弦位置编码的几何尺度思路，不是相对位置性质唯一要求的频谱，也不是已证明的普遍最优分配。[Transformer §3.5](https://arxiv.org/html/1706.03762v7)
+
+## 注意力与训练
+
+在标准缩放点积注意力中：
+
+$$
+s_{mn}=
+\frac{x_m^\top W_Q^\top\mathcal R_\Delta W_Kx_n}
+{\sqrt{d_h}},\qquad
+a_{mn}=\operatorname{softmax}_n(s_{mn}),\qquad
+o_m=\sum_n a_{mn}v_n.
+$$
+
+固定频率提供位置响应，训练调整 $W_Q,W_K$ 如何利用它。设 $g_m=\partial L/\partial o_m$，由链式法则：
+
+$$
+\epsilon_{mn}
+=\frac{\partial L}{\partial s_{mn}}
+=a_{mn}g_m^\top(v_n-o_m).
+$$
+
+再对 Q 投影求导：
+
+$$
+\frac{\partial L}{\partial W_Q}
+=\sum_{m,n}
+\frac{\epsilon_{mn}}{\sqrt{d_h}}
+(\mathcal R_\Delta k_n)x_m^\top.
+$$
+
+梯度中包含相对位置旋转。即使 $\omega_r$ 固定不训练，投影权重也会在不同位置关系下收到不同梯度。推导所用的<a href={href('math/#derivatives')}>矩阵求导</a>和<a href={href('math/#softmax')}>softmax 梯度</a>放在数学基础中。
+
+从响应函数看，固定一对内容向量后，某组贡献可写为：
+
+$$
+s_r(\Delta)=A_r\cos(\Delta\omega_r+\beta_r).
+$$
+
+训练改变内容相关的 $A_r,\beta_r$，从而形成偏好的相对位置响应；普通固定 RoPE 本身不新增可训练频率参数。余弦会振荡，不能把它直接理解成“距离越远，注意力一定越小”。
+
+为了单独看清相位如何学习，取 $A=1$、固定 $\omega=0.4$，只调整内容相位 $\beta$。对候选偏移 $\Delta_j\in\{-8,\ldots,0\}$，希望注意力指向 $\Delta^\star=-3$：
+
+$$
+a_j=\operatorname{softmax}_j(\cos(\Delta_j\omega+\beta)),\qquad
+L=-\log a_{\Delta^\star},\qquad
+\frac{\partial L}{\partial\beta}
+=\sum_j(a_j-\mathbf1_{\Delta_j=\Delta^\star})[-\sin(\Delta_j\omega+\beta)].
+$$
+
+<CodeExample code={ropeCode.training} output={'loss: 1.9196 -> 1.8587\ngradient: -0.3664, beta_next: 0.5832'} />
+
+<Visualization id="rope-training" anchor="training-experiment" />
+
+点“一步梯度下降”可核对损失从 1.9196 变为 1.8587。这里把内容相位显式设为可训练标量，便于演示；真实模型通过 Q/K 投影间接改变它，不是在训练固定的 RoPE 频率。
+
+下面把同一思路接到 Q/K 投影，保留因果掩码，调用 `backward()` 检查梯度能否到达投影权重：
+
+<CodeExample code={ropeCode.attention} output="W_Q / W_K receive gradients through fixed RoPE: True" />
+
+这里直接监督最后一个 query 对目标 key 的注意力，目的是检查梯度路径；语言模型的训练还会继续经过 V、输出层和词表损失。
+
+
+## 部分旋转
+
+旋转维度可以小于注意力头维度。将内容向量分成旋转部分和非旋转部分：
+
+$$
+q=[q_R;q_N],\qquad k=[k_R;k_N],\qquad
+\widehat{\mathcal R}_m=\operatorname{diag}(\mathcal R_m,I).
+$$
+
+点积为：
+
+$$
+\widetilde q_m^\top\widetilde k_n
+=q_R^\top\mathcal R_\Delta k_R+q_N^\top k_N.
+$$
+
+第一项提供显式位置响应，第二项保留不经本层 RoPE 调制的内容匹配。两项相加、按模型的规则缩放后，再进入同一个 softmax。
+
+取 $q=(1,0,1,0)$、$k=(1,0,0.6,0)$，只旋转前两个维度。复用第一节的 `rotate2`：
+
+<CodeExample code={ropeCode.partial} output="partial: 0.3624 + 0.6000 = 0.9624" />
+
+<Visualization id="rope-partial" anchor="partial-experiment" />
+
+拖动 $\Delta$，旋转项振荡而内容项保持不变；改变内容项 $c$，总分曲线整体上下移动。图中展示缩放前点积。
+
+
+例如 $d_h=128,d_{\rm rot}=32$，就是 16 个二维旋转组加 96 个非旋转维度。它没有缩短 Q/K 向量，也不会单凭这一步缩小标准 KV cache。DeepSeek MLA 的解耦 RoPE 还结合了低秩 KV 压缩，原因见[缓存与 MLA](#qa-cache)。[DeepSeek-V2 §2.1.3](https://arxiv.org/html/2405.04434)
+
+## M-RoPE 时空位置
+
+普通 RoPE 给 token 一个标量位置；M-RoPE 给视觉 token 使用时间、高度、宽度坐标：
+
+$$
+p_m=(t_m,h_m,w_m).
+$$
+
+各二维组选择某个坐标轴 $a(r)\in\{t,h,w\}$，从而得到：
+
+$$
+\widetilde q_{m,r}
+=R\left(p_m^{a(r)}\omega_r\right)q_{m,r}.
+$$
+
+对应点积中的旋转项依赖该轴上的坐标差：
+
+$$
+\sum_r q_{m,r}^\top
+R\left((p_n^{a(r)}-p_m^{a(r)})\omega_r\right)k_{n,r}.
+$$
+
+| 输入 | 时间 t | 高度 h 和宽度 w |
+| --- | --- | --- |
+| 文本 | 三个轴使用相同位置 ID | 等价于一维 RoPE |
+| 图片 | 同一图片的时间坐标固定 | 表示视觉网格位置 |
+| 视频 | 随时间推进 | 表示各帧的空间位置 |
+
+例如一个 $2\times2$ 网格可以依次使用 $(0,0,0),(0,0,1),(0,1,0),(0,1,1)$。第二个到第三个 token 虽然序列索引相邻，但空间坐标差是 $(0,1,-1)$，与向右相邻不同。
+
+下面用三个二维组分别对应 t、h、w，三组暂时都取 $\omega=0.4$，以便单独观察坐标轴选择；真实模型的分组与频谱应按其配置生成。
+
+<CodeExample code={ropeCode.mrope} output={'axis contributions: [1.0000, 0.9211, 1.0000]\nmrope: 2.9211'} />
+
+<Visualization id="rope-mrope" anchor="mrope-experiment" />
+
+查询固定在原点。先选择 (0, 1, 0)，只有 h 组发生相对旋转；再选择 (1, 1, 0)，t 组也随之改变。
+
+Qwen2.5-VL 还把时间 ID 与实际时间间隔对齐。三个轴使用的是同一注意力头中不同的通道组，不是三组注意力头，也不把 embedding 维度扩大三倍。位置编号也不等同于展开后 token 数量。[Qwen2.5-VL §2.1.3](https://arxiv.org/html/2502.13923v1#S2.SS1.SSS3)
+
+## 工程视角与开源实现
+
+同一旋转可以用复数乘法实现，也可以直接写成正余弦运算。对照两个固定版本的实现：
+
+| 来源 | 关键函数 | 通道约定 |
+| --- | --- | --- |
+| [Meta Llama 3](https://github.com/meta-llama/llama3/blob/a0940f9cf7065d45bb6675660f80d305c041a754/llama/model.py#L49-L75) | `precompute_freqs_cis`、`apply_rotary_emb` | 相邻配对，使用复数 |
+| [Transformers v4.45.2 Llama](https://github.com/huggingface/transformers/blob/v4.45.2/src/transformers/models/llama/modeling_llama.py#L248-L278) | `rotate_half`、`apply_rotary_pos_emb` | 前后半区配对，使用实数 |
+
+前面的 `rope_complex` 沿用复数乘法思路，使用简化接口重写。Meta 原代码布局为 `[batch, seq, heads, dim]`，本文统一采用 `[batch, heads, seq, dim]`，所以广播轴不能直接照抄。
+
+四维相邻布局为 $(a_0,b_0,a_1,b_1)$，前后半区布局为 $(a_0,a_1,b_0,b_1)$。若 $P$ 表示这次重排，则：
+
+$$
+x_{\rm half}=Px_{\rm adjacent},\qquad
+R_{\rm half}=P R_{\rm adjacent}P^\top.
+$$
+
+<CodeExample code={ropeCode.pairing} output="adjacent / split-half agree after permutation: True" />
+
+<Visualization id="rope-pairing" anchor="pairing-experiment" />
+
+两种写法在对应的坐标重排后等价；直接把一种旋转函数接到另一种权重布局上，会改变模型计算。本文示例用于核对普通 RoPE 数学，不包含 checkpoint 的频率缩放和全部推理逻辑。
+
+## 模型参数快照
+
+以下为 2026-10-19 公开配置中的实例。维度均按单个 Q/K 头计，旋转维度是参与旋转的实数维度；二维组数为它的一半。
+
+| 模型 | Q/K 头维度 | 旋转维度 | 底数 B | 额外设置 |
+| --- | --- | --- | --- | --- |
+| [Qwen3-32B](https://huggingface.co/Qwen/Qwen3-32B/blob/main/config.json) | 128 | 128 | 1000000 | 默认 RoPE |
+| [Qwen2.5-VL-7B](https://huggingface.co/Qwen/Qwen2.5-VL-7B-Instruct/blob/main/config.json) | 128 | 128 | 1000000 | M-RoPE 分组 16 / 24 / 24 |
+| [Qwen3-VL-8B](https://huggingface.co/Qwen/Qwen3-VL-8B-Instruct/blob/main/config.json) | 128 | 128 | 5000000 | 交错分组 24 / 20 / 20 |
+| [Qwen3.5-9B](https://huggingface.co/Qwen/Qwen3.5-9B/blob/main/config.json) | 256 | 64 | 10000000 | 旋转比例 0.25，分组 11 / 11 / 10 |
+| [DeepSeek-V3.2](https://huggingface.co/deepseek-ai/DeepSeek-V3.2/blob/main/config.json) | 192 = 128 + 64 | 64 | 10000 | YaRN，factor 40，原始长度 4096 |
+| [DeepSeek-V4-Flash](https://huggingface.co/deepseek-ai/DeepSeek-V4-Flash/blob/main/config.json) | 512 | 64 | 10000 | YaRN，factor 16；另有 compress_rope_theta 160000 |
+| [Kimi-K2.5](https://huggingface.co/moonshotai/Kimi-K2.5/blob/main/config.json) | 192 = 128 + 64 | 64 | 50000 | YaRN，factor 64，原始长度 4096 |
+| [GLM-5](https://huggingface.co/zai-org/GLM-5/blob/main/config.json) | 256 = 192 + 64 | 64 | 1000000 | 默认 RoPE，交错配对 |
+| [Gemma 4 31B 局部层](https://huggingface.co/google/gemma-4-31B-it/blob/main/config.json) | 256 | 256 | 10000 | sliding attention |
+| [Gemma 4 31B 全局层](https://huggingface.co/google/gemma-4-31B-it/blob/main/config.json) | 512 | 128 个非零旋转维度 | 1000000 | proportional，比例 0.25 |
+| [Llama 3.3 70B](https://github.com/meta-llama/llama-models/blob/main/models/sku_list.py) | 128 = 8192 / 64 | 128 | 500000 | scaled RoPE，[缩放因子 8](https://github.com/meta-llama/llama-models/blob/main/models/llama3/model.py) |
+
+几个容易误读的地方：
+
+- Qwen3-32B 明确设置了 head_dim=128，不能直接用 hidden_size 除以头数代替这个字段。
+- Qwen3.5 的这行对应 full attention 层；线性注意力层不能直接套用同一解释。
+- M-RoPE 分组数字统计的是二维频率组，例如 16+24+24=64 组，对应 128 个实数维度。
+- GLM-5 的配置还有 head_dim=64，但完整 Q/K 头维度应看 qk_head_dim=256。
+- Gemma 4 的 proportional 方案使用完整头维度作为频率指数分母，再把其余频率置零，不等同于重新按较小 $d_{\rm rot}$ 生成普通部分 RoPE。[实现](https://github.com/huggingface/transformers/blob/main/src/transformers/modeling_rope_utils.py)
+- YaRN、频率缩放和层类型都会影响解释，不能只比较一个 B。
+
+此前讨论的 Llama 4，官方代码默认底数为 500000；Scout 的缩放回退值为 16。这属于代码默认值，不能替代具体 checkpoint 配置，故不混入上表的完整维度统计。[官方参数代码](https://github.com/meta-llama/llama-models/blob/main/models/llama4/args.py)
+
+## 参考资料
+
+1. 苏剑林：[Transformer升级之路：2、博采众长的旋转式位置编码](https://spaces.ac.cn/archives/8265)。
+2. Su et al.：[RoFormer](https://arxiv.org/abs/2104.09864)。
+3. Vaswani et al.：[Attention Is All You Need](https://arxiv.org/abs/1706.03762)。
+4. Qwen Team：[Qwen2.5-VL Technical Report](https://arxiv.org/abs/2502.13923)。
+5. DeepSeek-AI：[DeepSeek-V2](https://arxiv.org/abs/2405.04434)。
+6. Barbero et al.：[Round and Round We Go](https://proceedings.iclr.cc/paper_files/paper/2025/file/e6d58fc68c0f3c36ae6e0e64478a69c0-Paper-Conference.pdf)。
+
+<span id="问答记录" className="section-anchor" />
+
+## 关键问答
+
+<QuestionTools />
+
+<Question id="qa-rotation" number={1} question="为什么旋转适合相对位置编码，它是唯一选择吗？">
+
+旋转具有可合成性 $R(a)R(b)=R(a+b)$，正交性又把转置变成逆变换。因此，两个绝对位置的旋转在点积中合并为角度差。
+
+若额外要求位置变换连续、正交并满足平移合成律，就可以用反对称矩阵的指数表示，并分解成二维旋转块。这解释了构造的自然性，但不证明所有相对位置编码只能采用 RoPE。进一步的数学条件见<a href={href('math/#matrix-exponential')}>矩阵指数</a>。
+
+</Question>
+
+<Question id="qa-frequency-index" number={2} question="token 位置和通道编号，究竟哪个决定频率？">
+
+频率由通道组编号 $r$ 决定；token 位置 $m$ 决定累计相位：
+
+$$
+\phi_{m,r}=m\omega_r,\qquad
+\phi_{m+1,r}-\phi_{m,r}=\omega_r.
+$$
+
+同一组不会因为 token 靠后就转得更慢。普通 RoPE 中，靠后的通道组通常频率更低，不能把这两种“靠后”混为一谈。
+
+</Question>
+
+<Question id="qa-spectrum" number={3} question="频率为什么按指数分配，可以全部相同吗？">
+
+几何分配让频率在对数尺度上等间隔，用有限通道覆盖多种变化尺度。它是设计选择，不是相对位置性质的必要条件。
+
+所有组也可以共用一个频率。但对固定 Q/K，总响应会合并为 $A\cos(\Delta\omega)+C\sin(\Delta\omega)$；多频率可以叠加更丰富的位置响应。上方实验提供了两种模式的对照。
+
+</Question>
+
+<Question id="qa-importance" number={4} question="低频通道是不是更不重要？">
+
+不是。旋转因子的模长为 1，频率并不是一个衰减权重。
+
+在 $s_r(\Delta)=A_r\cos(\Delta\omega_r+\beta_r)$ 中，$\omega_r$ 控制响应的变化速度，内容相关的 $A_r,\beta_r$ 由 Q/K 投影决定。模型会学习信息分配，不能仅凭通道编号判断贡献大小。
+
+</Question>
+
+<Question id="qa-dimensions" number={5} question="二维旋转怎样组成高维编码，奇数维又怎么办？">
+
+四维向量可拆为 $(a,b)$、$(c,d)$，分别旋转再拼接；内积也是两组结果之和。五维则可使用两个二维旋转组，再留一个坐标不动。输入还可以先经线性投影改变维度。
+
+数学上允许这样处理，但实际内核通常要求旋转维度为偶数。坐标也可能采用相邻配对或前后半区配对，需要遵守模型权重的排列约定。
+
+</Question>
+
+<Question id="qa-training" number={6} question="位置变换固定，模型究竟学到了什么？">
+
+固定的旋转改变了梯度方向，训练据此调整 Q/K 投影，而不必训练频率本身。主文中的 $\partial L/\partial W_Q$ 已显式包含相对位置矩阵。
+
+从相位看，调整 $A\cos(\Delta\omega+\beta)$ 中内容相关的 $\beta$，可让某个偏移 $\Delta^\star$ 获得较高响应，例如 $\beta=-\Delta^\star\omega$。单频响应有周期性，真实注意力还会结合其他频率和内容。
+
+</Question>
+
+<Question id="qa-complexity" number={7} question="引入相对位置变量，会增加参数和计算复杂度吗？">
+
+它丰富了匹配函数的输入依赖：由 $s(q,k)$ 变成显式包含位置的 $s(q,k,\Delta)$。
+
+普通固定 RoPE 不新增可训练频率参数，旋转约需 $O(Ld_{\rm rot})$ 运算，标准 QK 点积仍约为 $O(L^2d_h)$。表达形式变丰富，与渐近计算复杂度提高，是不同问题。
+
+</Question>
+
+<Question id="qa-partial" number={8} question="既然全旋转不丢信息，为什么还要部分旋转？">
+
+全旋转确实可逆。部分旋转的目的，是同时保留显式位置响应与不经本层 RoPE 调制的内容匹配通道。
+
+已有 p-RoPE 实验支持某些设置下减少旋转的有效性，但最佳比例仍取决于模型、频谱和训练；不能推出所有模型都应只旋转固定比例。[ICLR 2025 §6.1](https://proceedings.iclr.cc/paper_files/paper/2025/file/e6d58fc68c0f3c36ae6e0e64478a69c0-Paper-Conference.pdf)
+
+</Question>
+
+<Question id="qa-zero-frequency" number={9} question="低频和不旋转是一回事吗？">
+
+低频只有在 $|\Delta\omega|\ll1$ 时近似不变，随着相对距离增大，仍可能积累显著相位。零频率则始终不转。
+
+所以“保留低频通道”和“设置非旋转通道”并不等价。普通部分旋转与保留原频谱再把部分频率置零，也可能采用不同的频率范围。
+
+</Question>
+
+<Question id="qa-cache" number={10} question="部分旋转能直接缩小 KV cache 吗？">
+
+不能单凭这一步做到。向量的完整维度仍在，只是其中一部分不旋转；它能减少旋转运算和相关的正余弦表开销。
+
+MLA 的缓存节省还依赖低秩内容分支。若 $k_C=W_Uc$，内容分数可写成 $q_C^\top W_Uc=(W_U^\top q_C)^\top c$。插入位置相关旋转后，不能再简单吸收为同一个固定矩阵，因此 DeepSeek 将小的 RoPE 分支与低秩内容分支解耦。[DeepSeek-V2 §2.1.3](https://arxiv.org/html/2405.04434)
+
+</Question>
+
+<Question id="qa-mrope" number={11} question="M-RoPE 的三个坐标轴，是三组注意力头吗？">
+
+不是。它把同一头内的二维通道组分配给时间、高度、宽度轴，既不新增三组注意力头，也不把 embedding 扩大三倍。
+
+坐标 ID 也不等同于展开后的 token 数。例如 Qwen2-VL 用此前坐标最大值加 1 接续下一段，这可以不同于序列长度。[坐标实现](https://github.com/huggingface/transformers/blob/v4.45.2/src/transformers/models/qwen2_vl/modeling_qwen2_vl.py)
+
+M-RoPE 提供时空关系，跟踪、运动补偿和 token 压缩需要其他机制。
+
+</Question>
+
+<Question id="qa-complex-proof" number={12} question="复数推导中，哪些条件是额外加入的？">
+
+除了实内积的相对位置目标，还进一步要求整个复数乘积 $f(q,m)\overline{f(k,n)}$ 只依赖相对位置，并设 $f(z,0)=z$。
+
+取 $m=n$、$q=k$ 得到模长保持。对非零向量写成 $f(q,m)=q\,a(q,m)$ 后，同位置约束使内容向量共享相位因子 $a_m$。相邻位置又要求 $a_m\overline{a_{m-1}}=c$ 为固定单位复数，所以 $a_m=c^m=e^{im\omega}$。
+
+这构造出了 $f(z,m)=ze^{im\omega}$，但不能省略附加条件并称其为原始问题的唯一解。[苏剑林原文](https://spaces.ac.cn/archives/8265)
+
+</Question>

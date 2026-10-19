@@ -1,0 +1,86 @@
+---
+import katex from 'katex';
+import { checkNumber, type RotationOptions } from '../../visualizations/registry';
+interface Props extends RotationOptions {}
+const { m = 2, n = 5, omega = 0.4, maxPosition = 30 } = Astro.props;
+checkNumber('maxPosition', maxPosition, 1, 10000, true);
+checkNumber('m', m, 0, maxPosition, true);
+checkNumber('n', n, 0, maxPosition, true);
+checkNumber('omega', omega, 0.05, 1);
+const uid = `rotation-${crypto.randomUUID()}`;
+const vector = (angle: number, offset = 0) => ({
+  x: 240 + 123 * Math.cos(angle), y: 180 - 123 * Math.sin(angle),
+  labelX: 240 + (143 + offset) * Math.cos(angle), labelY: 185 - (143 + offset) * Math.sin(angle),
+});
+const q = vector(m * omega), k = vector(n * omega, m === n ? 20 : 0);
+const delta = Math.atan2(Math.sin((n - m) * omega), Math.cos((n - m) * omega));
+const arc = Array.from({ length: 41 }, (_, i) => {
+  const angle = m * omega + delta * i / 40;
+  return `${i ? 'L' : 'M'}${240 + 52 * Math.cos(angle)},${180 - 52 * Math.sin(angle)}`;
+}).join(' ');
+const formula = katex.renderToString(String.raw`\langle R(m\omega)q,\,R(n\omega)k\rangle = \cos\big((n-m)\omega\big)`, { displayMode: true, throwOnError: true });
+---
+
+<rope-rotation class="rope-lab" data-rope-lab aria-label="RoPE 旋转实验">
+  <div class="lab-visual"><svg viewBox="0 0 480 360" class="lab-svg" role="img" aria-label="查询向量和键向量在同一个复平面上的旋转"><defs><marker id={`${uid}-arrow-q`} markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 7 3.5 0 7" fill="var(--accent)"/></marker><marker id={`${uid}-arrow-k`} markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto"><path d="M0 0 7 3.5 0 7" fill="var(--warm)"/></marker></defs><g class="lab-grid-lines"><path d="M40 60H440M40 120H440M40 180H440M40 240H440M40 300H440M60 25V335M120 25V335M180 25V335M240 25V335M300 25V335M360 25V335M420 25V335"/></g><circle cx="240" cy="180" r="123" class="lab-orbit"/><path d="M45 180H435M240 30V330" class="lab-axis"/><path d={arc} data-arc class="lab-phase-arc"/><line x1="240" y1="180" x2={q.x} y2={q.y} data-q class="lab-vector-q" marker-end={`url(#${uid}-arrow-q)`}/><line x1="240" y1="180" x2={k.x} y2={k.y} data-k class="lab-vector-k" marker-end={`url(#${uid}-arrow-k)`}/><circle cx="240" cy="180" r="4" fill="var(--ink)"/><text x={q.labelX} y={q.labelY} data-q-label class="lab-label-q">q</text><text x={k.labelX} y={k.labelY} data-k-label class="lab-label-k">k</text><text x="430" y="199" class="lab-axis-label">Re</text><text x="251" y="37" class="lab-axis-label">Im</text></svg><div class="lab-legend"><span><i class="q-dot"></i> 查询 q</span><span><i class="k-dot"></i> 键 k</span></div></div>
+  <div class="lab-controls"><p class="lab-controls-title">参数</p><p class="lab-help">单个二维通道组，q = k = (1, 0)。</p><label class="slider-label" for={`${uid}-m`}><span>查询位置 <em>m</em></span><output id={`${uid}-value-m`} for={`${uid}-m`} data-value-m>{m}</output></label><input id={`${uid}-m`} type="range" min="0" max={maxPosition} value={m} data-m step="1" /><label class="slider-label" for={`${uid}-n`}><span>键位置 <em>n</em></span><output id={`${uid}-value-n`} for={`${uid}-n`} data-value-n>{n}</output></label><input id={`${uid}-n`} type="range" min="0" max={maxPosition} value={n} data-n step="1" /><label class="slider-label" for={`${uid}-omega`}><span>旋转频率 <em>ω</em></span><output id={`${uid}-value-omega`} for={`${uid}-omega`} data-value-omega>{omega.toFixed(2)} rad / token</output></label><input id={`${uid}-omega`} type="range" min="0.05" max="1" value={omega} step="0.01" data-omega /><div class="lab-metrics" aria-live="polite"><div><span>相对位置 n − m</span><strong data-relative>{n - m}</strong></div><div><span>旋转后点积</span><strong data-score>{Math.cos((n - m) * omega).toFixed(4)}</strong></div></div><div class="lab-buttons"><button type="button" class="button secondary" data-shift disabled={m >= maxPosition || n >= maxPosition}>两者一起 +1</button><button type="button" class="reset-button" data-reset>重置</button></div><p class="lab-explanation" data-explanation>共同平移位置，点积不变。</p></div>
+  <div class="lab-formula" set:html={formula}></div>
+</rope-rotation>
+
+<script>
+  class RopeRotation extends HTMLElement {
+    private events?: AbortController;
+    connectedCallback() {
+      if (this.events) return;
+      this.events = new AbortController();
+      const { signal } = this.events;
+      const m = this.querySelector<HTMLInputElement>('[data-m]')!;
+      const n = this.querySelector<HTMLInputElement>('[data-n]')!;
+      const omega = this.querySelector<HTMLInputElement>('[data-omega]')!;
+      const shift = this.querySelector<HTMLButtonElement>('[data-shift]')!;
+      const explain = (text: string) => { this.querySelector('[data-explanation]')!.textContent = text; };
+      const update = () => {
+        const a = Number(m.value), b = Number(n.value), w = Number(omega.value);
+        this.querySelector('[data-value-m]')!.textContent = String(a);
+        this.querySelector('[data-value-n]')!.textContent = String(b);
+        this.querySelector('[data-value-omega]')!.textContent = `${w.toFixed(2)} rad / token`;
+        this.querySelector('[data-relative]')!.textContent = String(b - a);
+        this.querySelector('[data-score]')!.textContent = Math.cos((b - a) * w).toFixed(4);
+        const setVector = (key: string, angle: number, offset: number) => {
+          const line = this.querySelector(`[data-${key}]`)!;
+          line.setAttribute('x2', String(240 + 123 * Math.cos(angle)));
+          line.setAttribute('y2', String(180 - 123 * Math.sin(angle)));
+          const label = this.querySelector(`[data-${key}-label]`)!;
+          label.setAttribute('x', String(240 + (143 + offset) * Math.cos(angle)));
+          label.setAttribute('y', String(185 - (143 + offset) * Math.sin(angle)));
+        };
+        setVector('q', a * w, 0);
+        setVector('k', b * w, a === b ? 20 : 0);
+        const delta = Math.atan2(Math.sin((b - a) * w), Math.cos((b - a) * w));
+        this.querySelector('[data-arc]')!.setAttribute('d', Array.from({ length: 41 }, (_, i) => {
+          const angle = a * w + delta * i / 40;
+          return `${i ? 'L' : 'M'}${240 + 52 * Math.cos(angle)},${180 - 52 * Math.sin(angle)}`;
+        }).join(' '));
+        shift.disabled = a >= Number(m.max) || b >= Number(n.max);
+      };
+      this.addEventListener('input', () => { update(); explain('点积由相对相位 (n − m)ω 决定。'); }, { signal });
+      shift.addEventListener('click', () => {
+        if (shift.disabled) return;
+        m.value = String(Number(m.value) + 1); n.value = String(Number(n.value) + 1);
+        update(); explain('m、n 同时增加 1，点积不变。');
+      }, { signal });
+      this.querySelector('[data-reset]')!.addEventListener('click', () => {
+        [m, n, omega].forEach(input => { input.value = input.defaultValue; });
+        update(); explain('共同平移位置，点积不变。');
+      }, { signal });
+      update();
+    }
+    disconnectedCallback() { this.events?.abort(); this.events = undefined; }
+  }
+  if (!customElements.get('rope-rotation')) customElements.define('rope-rotation', RopeRotation);
+</script>
+<style>
+  .rope-lab{display:grid;grid-template-columns:1.1fr 1fr;border:1px solid var(--line);background:var(--surface)}.lab-visual{display:flex;flex-direction:column;justify-content:center;padding:25px;border-right:1px solid var(--line);background:var(--paper)}.lab-svg{width:100%;height:auto}.lab-grid-lines{stroke:var(--line);stroke-width:.7}.lab-orbit{fill:none;stroke:var(--accent);stroke-width:1;opacity:.5}.lab-axis{stroke:var(--muted);stroke-width:1;opacity:.6}.lab-phase-arc{stroke:var(--accent);stroke-width:1.5;fill:none;opacity:.75}.lab-vector-q,.lab-vector-k{stroke-width:2;stroke:var(--accent)}.lab-vector-k{stroke:var(--warm)}.lab-label-q,.lab-label-k{font:italic 20px Georgia,serif;fill:var(--accent);text-anchor:middle}.lab-label-k{fill:var(--warm)}.lab-axis-label{fill:var(--muted);font:12px Georgia,serif}.lab-legend{display:flex;gap:25px;justify-content:center;font-size:11px;color:var(--muted);margin-bottom:15px}.lab-legend span{display:flex;align-items:center;gap:6px}.lab-legend i{width:7px;height:7px;border-radius:50%}.q-dot{background:var(--accent)}.k-dot{background:var(--warm)}.lab-controls{padding:34px 36px}.lab-controls>.eyebrow{margin-bottom:13px}.lab-controls h2{font:500 26px/1.65 var(--serif);margin-bottom:14px}.lab-help{font-size:11px;color:var(--muted);line-height:1.9;margin-bottom:26px}.slider-label{display:flex;align-items:center;justify-content:space-between;gap:12px;font-size:11px;margin-top:15px}.slider-label em{font-family:Georgia,serif;font-size:15px;margin-left:5px;color:var(--accent)}.slider-label output{font:11px var(--mono);color:var(--accent)}.lab-metrics{display:flex;gap:32px;border-top:1px solid var(--line);margin-top:23px;padding-top:19px}.lab-metrics>div{display:flex;flex-direction:column;gap:7px}.lab-metrics span{font-size:10px;color:var(--muted)}.lab-metrics strong{font:500 25px var(--mono);color:var(--accent)}.lab-buttons{display:flex;gap:22px;align-items:center;margin-top:25px}.lab-buttons .button{font-size:11px;min-height:38px;padding:7px 13px}.reset-button{font-size:11px;border:0;background:transparent;color:var(--muted);padding:9px}.reset-button:hover{color:var(--accent)}.lab-explanation{font-size:10px;color:var(--muted);margin:15px 0 0;line-height:1.9}.lab-formula{grid-column:1/-1;border-top:1px solid var(--line);padding:13px 20px;color:var(--accent);overflow-x:auto;font-size:15px}
+  .lab-controls{padding:20px}.lab-help{margin-bottom:15px}.lab-buttons{margin-top:20px}.lab-explanation{margin-bottom:0}.lab-metrics{gap:20px}.lab-formula{font-size:12px}
+  .lab-controls-title{font:500 20px/1.65 var(--serif);margin:0 0 10px}
+</style>

@@ -1,0 +1,81 @@
+---
+import { checkNumber, type FrequencyOptions } from '../../visualizations/registry';
+interface Props extends FrequencyOptions {}
+const { m = 8, base = 10000, dimensions = 8, maxPosition = 80, mode = 'multi' } = Astro.props;
+checkNumber('maxPosition', maxPosition, 1, 10000, true);
+checkNumber('m', m, 0, maxPosition, true);
+checkNumber('base', base, 2, 1000000000);
+checkNumber('dimensions', dimensions, 2, 16, true);
+if (dimensions % 2 || !['multi', 'same'].includes(mode)) throw new Error('Use even dimensions and multi/same mode.');
+const bases = [...new Set([100, 10000, 1000000, base])].sort((a, b) => a - b);
+const planes = Array.from({ length: dimensions / 2 }, (_, r) => {
+  const omega = mode === 'same' ? 1 : Math.pow(base, -2 * r / dimensions);
+  const phase = m * omega;
+  return { r, omega, phase, x: 70 + 46 * Math.cos(phase), y: 70 - 46 * Math.sin(phase) };
+});
+---
+<rope-frequencies class="frequency-lab" data-frequency-lab data-dimensions={dimensions} data-initial-mode={mode} aria-label="多通道频率实验">
+  <div class="frequency-controls">
+    <label>位置 m <output data-m-value>{m}</output><input data-m type="range" min="0" max={maxPosition} value={m} step="1" aria-label="多通道 token 位置" /></label>
+    <label>底数 B <select data-base aria-label="频率底数" disabled={mode === 'same'}>{bases.map(value => <option value={value} selected={value === base}>{value}</option>)}</select></label>
+    <div class="frequency-mode" aria-label="频率模式"><button type="button" data-mode="multi" aria-pressed={mode === 'multi'}>多频率</button><button type="button" data-mode="same" aria-pressed={mode === 'same'}>同频率</button></div>
+    <button type="button" class="reset-button" data-reset>重置</button>
+  </div>
+  <div class="frequency-planes">{planes.map(({ r, omega, phase, x, y }) => <div class="frequency-plane" data-plane={r}>
+    <strong>r = {r}</strong><svg viewBox="0 0 140 140" role="img" aria-label={`第 ${r} 个二维通道组`}><circle cx="70" cy="70" r="46" class="frequency-orbit"/><path d="M12 70H128M70 12V128" class="frequency-axis"/><line x1="70" y1="70" x2={x} y2={y} data-vector/><circle cx={x} cy={y} r="3.5" data-tip/></svg>
+    <span data-omega>ω = {Number(omega.toPrecision(3))}</span><span data-phase>mω = {Number(phase.toPrecision(3))} rad</span><small>特征 {2 * r}、{2 * r + 1}</small>
+  </div>)}</div>
+  <p class="frequency-caption">d_rot = {dimensions}，共 {dimensions / 2} 个二维组。改变 m 累积相位，各组的频率不随 m 改变。</p>
+</rope-frequencies>
+<script>
+  class RopeFrequencies extends HTMLElement {
+    private events?: AbortController;
+    connectedCallback() {
+      if (this.events) return;
+      this.events = new AbortController();
+      const { signal } = this.events;
+      const position = this.querySelector<HTMLInputElement>('[data-m]')!;
+      const base = this.querySelector<HTMLSelectElement>('[data-base]')!;
+      const buttons = [...this.querySelectorAll<HTMLButtonElement>('[data-mode]')];
+      let mode = buttons.find(button => button.getAttribute('aria-pressed') === 'true')!.dataset.mode!;
+      const update = () => {
+        const m = Number(position.value), b = Number(base.value);
+        this.querySelector('[data-m-value]')!.textContent = String(m);
+        base.disabled = mode === 'same';
+        this.querySelectorAll<HTMLElement>('[data-plane]').forEach(plane => {
+          const r = Number(plane.dataset.plane);
+          const omega = mode === 'same' ? 1 : Math.pow(b, -2 * r / Number(this.dataset.dimensions));
+          const phase = m * omega, x = 70 + 46 * Math.cos(phase), y = 70 - 46 * Math.sin(phase);
+          plane.querySelector('[data-vector]')!.setAttribute('x2', String(x));
+          plane.querySelector('[data-vector]')!.setAttribute('y2', String(y));
+          plane.querySelector('[data-tip]')!.setAttribute('cx', String(x));
+          plane.querySelector('[data-tip]')!.setAttribute('cy', String(y));
+          plane.querySelector('[data-omega]')!.textContent = `ω = ${Number(omega.toPrecision(3))}`;
+          plane.querySelector('[data-phase]')!.textContent = `mω = ${Number(phase.toPrecision(3))} rad`;
+        });
+        buttons.forEach(button => button.setAttribute('aria-pressed', String(button.dataset.mode === mode)));
+      };
+      position.addEventListener('input', update, { signal });
+      base.addEventListener('change', update, { signal });
+      buttons.forEach(button => button.addEventListener('click', () => { mode = button.dataset.mode!; update(); }, { signal }));
+      this.querySelector('[data-reset]')!.addEventListener('click', () => {
+        position.value = position.defaultValue;
+        base.value = [...base.options].find(option => option.defaultSelected)!.value;
+        mode = this.dataset.initialMode!;
+        update();
+      }, { signal });
+      update();
+    }
+    disconnectedCallback() { this.events?.abort(); this.events = undefined; }
+  }
+  if (!customElements.get('rope-frequencies')) customElements.define('rope-frequencies', RopeFrequencies);
+</script>
+<style>
+  .frequency-lab{border:1px solid var(--line);background:var(--surface);padding:18px;margin:26px 0;font-size:12px}.frequency-controls{display:flex;align-items:center;gap:20px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:16px}.frequency-controls>label:first-child{flex:1;min-width:160px}.frequency-controls label{font-size:11px}.frequency-controls output{float:right;font-family:var(--mono);color:var(--accent)}.frequency-controls input{display:block;margin-top:5px}.frequency-controls select{font:11px var(--mono);margin-left:8px;background:var(--paper);border:1px solid var(--line);border-radius:3px;padding:5px;color:var(--ink);max-width:110px}.frequency-mode{display:flex;gap:5px}.frequency-mode button{font-size:10px;border:1px solid var(--line);padding:5px 9px;background:transparent;border-radius:3px}.frequency-mode button[aria-pressed=true]{background:var(--accent-soft);border-color:var(--accent);color:var(--accent)}.frequency-planes{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-block:18px}.frequency-plane{text-align:center;min-width:0}.frequency-plane>strong{font:11px var(--mono);color:var(--accent)}.frequency-plane>span{display:block;font:10px/1.9 var(--mono)}.frequency-plane>small{font-size:9px;color:var(--muted)}.frequency-plane svg{width:100%;height:auto}.frequency-orbit{fill:none;stroke:var(--line)}.frequency-axis{stroke:var(--line);stroke-width:.6}.frequency-plane [data-vector]{stroke:var(--accent);stroke-width:1.8}.frequency-plane [data-tip]{fill:var(--accent)}.frequency-caption{font-size:10px;color:var(--muted);margin:0;line-height:1.9}
+
+  .reset-button{font-size:11px;border:0;background:transparent;color:var(--muted);padding:9px}.reset-button:hover{color:var(--accent)}
+  rope-frequencies{display:block}
+  .frequency-caption{font-size:10px;color:var(--muted);margin:0;line-height:1.9}
+  .frequency-planes{grid-template-columns:repeat(auto-fit,minmax(100px,1fr))}
+  @container experiment (max-width:440px){.frequency-planes{grid-template-columns:repeat(2,minmax(0,1fr))}}
+</style>
