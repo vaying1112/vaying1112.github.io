@@ -142,13 +142,25 @@ SITE_URL=https://example.github.io BASE_PATH=/notes npm run build
 
 ## 发布到 GitHub Pages
 
+当前仓库已配置 `main` 分支自动发布。日常更新可以在本地修改后提交并推送：
+
+```sh
+git add .
+git commit -m "更新文章"
+git push origin main
+```
+
+也可以在 GitHub 网页或 GitHub Desktop 中修改、提交。每次推送会自动检查和重新部署；在仓库的 Actions 页面查看结果。
+
+以下是为其他账号重新部署的步骤：
+
 1. 登录你自己的 GitHub 账户，创建一个空的**公开仓库**。使用 `用户名.github.io` 作为仓库名会发布在根网址；也可以用 `notes` 等名称，发布到仓库子路径。
 2. 把本项目的源文件放在仓库根目录并推送到 `main`。保留 `.github/`、`package-lock.json` 和其他配置文件；不要上传 `node_modules/`、`dist/` 或 `.astro/`。可通过 GitHub Desktop 完成提交与上传。
 3. 仓库进入 **Settings → Pages → Build and deployment → Source**，选择 **GitHub Actions**。
 4. 进入 **Actions**，运行 `Deploy blog to GitHub Pages`，或者提交一次更新触发自动发布。
 5. 工作流完成后，Pages 设置页和部署任务会显示真实网址。
 
-工作流已配置 Node.js 24、依赖安装、类型检查、构建和发布，并读取 GitHub 返回的域名与仓库子路径。没有写入个人账号、访问令牌或预设域名。当前项目尚未关联 GitHub 远程仓库。
+工作流已配置 Node.js 24、依赖安装、类型检查、构建和发布，并读取 GitHub 返回的域名与仓库子路径。没有写入个人账号、访问令牌或预设域名。项目仓库为 [vaying1112/vaying1112.github.io](https://github.com/vaying1112/vaying1112.github.io)，个人主页地址为 [一帆书签](https://vaying1112.github.io/)。
 
 在 GitHub Free 下，GitHub Pages 的这种用法需要公开源仓库。文章若有不希望公开的草稿，不要提交到公开仓库：`draft: true` 只阻止网站生成，不能隐藏 GitHub 中的源文件。
 
