@@ -41,7 +41,7 @@ function initialize(root: HTMLElement) {
   try { const draft = JSON.parse(sessionStorage.getItem(draftKey) || 'null'); if (draft) { body.value = draft.body || ''; quote = draft.quote || ''; anchor = draft.anchor || ''; replyTo = draft.replyTo || null; askAI.checked = draft.askAI !== false; if (quote || replyTo) compose(quote ? '评论选中的原文' : '继续回复'); root.querySelector<HTMLElement>('[data-character-count]')!.textContent = `${body.value.length} / 2000`; } } catch {}
 
   function status(value: string, error = false) { message.textContent = value; message.toggleAttribute('data-error', error); }
-  function clearContext() { quote = ''; anchor = ''; replyTo = null; context.hidden = true; requestId = crypto.randomUUID(); }
+  function clearContext() { quote = ''; anchor = ''; replyTo = null; context.hidden = true; requestId = crypto.randomUUID(); saveDraft(); }
   function compose(label: string) {
     context.hidden = false;
     root.querySelector<HTMLElement>('[data-compose-label]')!.textContent = label;
@@ -50,7 +50,7 @@ function initialize(root: HTMLElement) {
     quoteButton.hidden = true;
     form.scrollIntoView({ behavior: 'smooth', block: 'center' });
     body.focus({ preventScroll: true });
-    requestId = crypto.randomUUID();
+    requestId = crypto.randomUUID(); saveDraft();
   }
   function node<K extends keyof HTMLElementTagNameMap>(tag: K, className = '', value = '') {
     const element = document.createElement(tag);
@@ -136,8 +136,9 @@ function initialize(root: HTMLElement) {
     sending = true; submit.disabled = true; status('正在发表…');
     try {
       await accountRequest('/comments', { id: requestId, post, body: body.value, quote, anchor, replyTo, askAI: askAI.checked, website: (form.elements.namedItem('website') as HTMLInputElement).value });
+      body.value = ''; clearContext();
       try { sessionStorage.removeItem(draftKey); } catch {}
-      body.value = ''; clearContext(); root.querySelector<HTMLElement>('[data-character-count]')!.textContent = '0 / 2000';
+      root.querySelector<HTMLElement>('[data-character-count]')!.textContent = '0 / 2000';
       sending = false; await load(); status(askAI.checked ? '评论已发表，AI 回复将显示在这条讨论下。' : '评论已发表。');
     } catch (error) { saveDraft(); if (!token()) syncUser(); status(error instanceof Error ? error.message : '发表失败，内容已保留，请重试。', true); }
     finally { sending = false; submit.disabled = false; }

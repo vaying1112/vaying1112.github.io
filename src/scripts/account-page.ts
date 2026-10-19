@@ -14,7 +14,7 @@ function message(value: string, error = false) { const el = get('[data-account-m
 function setMode(value: string) {
   mode = value; form.reset(); password.autocomplete = mode === 'login' ? 'current-password' : 'new-password'; password.minLength = mode === 'login' ? 1 : 12;
   get('[data-recovery-field]').hidden = mode !== 'recover'; (form.elements.namedItem('recoveryCode') as HTMLInputElement).required = mode === 'recover';
-  get('[data-register-hint]').hidden = mode === 'login'; get('[data-password-label]').textContent = mode === 'recover' ? '新密码' : '密码';
+  get('[data-register-hint]').hidden = mode === 'login'; get('[data-register-hint]').textContent = mode === 'recover' ? '新密码至少 12 位。重设后请保存新的找回码。' : '密码至少 12 位。注册后请保存找回码，用于重设密码。'; get('[data-password-label]').textContent = mode === 'recover' ? '新密码' : '密码';
   authSubmit.textContent = { login: '登录', register: '创建账号', recover: '重设密码' }[mode]!;
   root.querySelectorAll('[data-mode]').forEach(button => button.setAttribute('aria-pressed', String((button as HTMLElement).dataset.mode === mode)));
   get('[data-forgot]').hidden = mode === 'recover'; message('');
